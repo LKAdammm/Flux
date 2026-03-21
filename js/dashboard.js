@@ -17,10 +17,51 @@ const defaultData = {
     summary: { totalIncomes: 0, totalExpenses: 0, finalBalance: 0 },
     months: [
         {
-            id: 'mars-2026', name: 'Mars', year: 2026, status: 'standard',
+            id: 'mars-2026', name: 'Mars', year: 2026, status: 'critical',
             incomes: { total: 0, details: [] }, 
-            expenses: { total: 0, details: [] },
-            endBalance: 0, note: "Bienvenue sur Flux ! Ajoutez vos premières transactions."
+            expenses: { total: 0, details: [{label: '⚠️ PayPal (Ancien)', amount: 124.50, day: 26}]},
+            endBalance: 0, note: "Couvert par le découvert."
+        },
+        {
+            id: 'avril-2026', name: 'Avril', year: 2026, status: 'standard',
+            incomes: { total: 0, details: [
+                {label: 'Bourse CROUS', amount: 382, day: 3}, {label: 'Salaire (Prorata 25h)', amount: 240, day: 3}, {label: 'Versement Prêt', amount: 2000, day: 5}
+            ]},
+            expenses: { total: 0, details: [
+                {label: 'Navigo', amount: 42, day: 1}, {label: 'Remb. Ami', amount: 160, day: 5}, {label: 'Dépenses', amount: 50, day: 10},
+                {label: 'SFR', amount: 15, day: 13}, {label: 'EFREI', amount: 670, day: 15}, {label: 'PayPal (4x)', amount: 160, day: 16}, {label: 'PayPal (Ancien)', amount: 124.50, day: 25}
+            ]},
+            endBalance: 0, note: "Arrivée du prêt."
+        },
+        {
+            id: 'mai-2026', name: 'Mai', year: 2026, status: 'standard',
+            incomes: { total: 0, details: [{label: 'Bourse CROUS', amount: 382, day: 3}, {label: 'Salaire', amount: 416, day: 3}, {label: 'Bonus LCL', amount: 150, day: 15}]},
+            expenses: { total: 0, details: [
+                {label: 'Navigo', amount: 42, day: 1}, {label: 'Prêt LCL', amount: 34.18, day: 5}, {label: 'Dépenses', amount: 50, day: 10},
+                {label: 'SFR', amount: 15, day: 13}, {label: 'EFREI', amount: 670, day: 15}, {label: 'PayPal (4x)', amount: 160, day: 16}, {label: 'PayPal (Ancien) - FIN', amount: 124.50, day: 24}
+            ]},
+            endBalance: 0, note: ""
+        },
+        {
+            id: 'juin-2026', name: 'Juin', year: 2026, status: 'landing',
+            incomes: { total: 0, details: [{label: 'Bourse CROUS', amount: 382, day: 3}, {label: 'Salaire', amount: 416, day: 3}]},
+            expenses: { total: 0, details: [
+                {label: 'Navigo', amount: 42, day: 1}, {label: 'Prêt LCL', amount: 34.18, day: 5}, {label: 'Dépenses', amount: 50, day: 10},
+                {label: 'SFR', amount: 15, day: 13}, {label: 'EFREI - FIN', amount: 670, day: 15}, {label: 'PayPal (4x) - FIN', amount: 160, day: 16}
+            ]},
+            endBalance: 0, note: "Fin EFREI."
+        },
+        {
+            id: 'juillet-2026', name: 'Juillet', year: 2026, status: 'savings',
+            incomes: { total: 0, details: [{label: 'Salaire', amount: 416, day: 3}]},
+            expenses: { total: 0, details: [{label: 'Navigo', amount: 42, day: 1}, {label: 'Prêt LCL', amount: 34.18, day: 5}, {label: 'Dépenses', amount: 50, day: 10}, {label: 'SFR', amount: 15, day: 13}]},
+            endBalance: 0, note: "Épargne."
+        },
+        {
+            id: 'aout-2026', name: 'Août', year: 2026, status: 'savings',
+            incomes: { total: 0, details: [{label: 'Salaire', amount: 416, day: 3}]},
+            expenses: { total: 0, details: [{label: 'Navigo', amount: 42, day: 1}, {label: 'Prêt LCL', amount: 34.18, day: 5}, {label: 'Dépenses', amount: 50, day: 10}, {label: 'SFR', amount: 15, day: 13}]},
+            endBalance: 0, note: "Épargne."
         }
     ]
 };
