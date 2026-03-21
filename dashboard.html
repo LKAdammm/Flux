@@ -6,28 +6,24 @@
     <title>Flux - Tableau de bord</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
         body { background-color: #1c1917; color: #d6d3d1; }
-        
-        /* Personnalisation de la barre de défilement pour un look très pro */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #292524; }
         ::-webkit-scrollbar-thumb { background: #57534e; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #78716c; }
-
         .chart-container { position: relative; width: 100%; height: 320px; }
-        
-        /* Animation d'ouverture des cartes de mois */
+        .doughnut-container { position: relative; width: 100%; height: 250px; }
         .month-card-content { max-height: 0; overflow: hidden; transition: max-height 0.4s ease-out, opacity 0.3s ease-out; opacity: 0; }
         .month-card-content.active { max-height: 2000px; opacity: 1; }
-        
         .icon-symbol { font-family: 'Segoe UI Emoji', 'Apple Color Emoji', sans-serif; }
     </style>
 </head>
 <body class="antialiased selection:bg-stone-700 selection:text-white font-sans flex flex-col min-h-screen">
 
-    <header class="bg-stone-800/80 backdrop-blur-md border-b border-stone-700 sticky top-0 z-50 shadow-sm">
-        <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <header class="bg-stone-800/80 backdrop-blur-md border-b border-stone-700 sticky top-0 z-50 shadow-sm" data-html2canvas-ignore>
+        <div class="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-900/50">
                     <span class="text-sm icon-symbol text-white">🚀</span>
@@ -41,17 +37,45 @@
         </div>
     </header>
 
-    <main class="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <main id="export-area" class="flex-1 max-w-[1500px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 xl:grid-cols-12 gap-8">
 
-        <div class="lg:col-span-8 space-y-8">
+        <div class="xl:col-span-8 space-y-6">
             
+            <div class="bg-stone-800 p-5 rounded-3xl border border-stone-700 shadow-md flex flex-col md:flex-row items-center justify-between gap-4" data-html2canvas-ignore>
+                
+                <div class="flex items-center gap-2 bg-stone-900 p-2 rounded-xl border border-stone-600">
+                    <span class="text-xs font-bold text-stone-400 px-2 uppercase tracking-wider">De</span>
+                    <select id="filter-start" onchange="window.updateApp()" class="bg-stone-900 text-white text-sm focus:outline-none cursor-pointer"></select>
+                    <span class="text-xs font-bold text-stone-400 px-2 uppercase tracking-wider">à</span>
+                    <select id="filter-end" onchange="window.updateApp()" class="bg-stone-900 text-white text-sm focus:outline-none cursor-pointer"></select>
+                </div>
+
+                <div class="flex-1 w-full flex flex-col justify-center px-4 border-l border-r border-stone-700/50">
+                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                        <input type="checkbox" id="goal-active" onchange="window.updateGoal()" class="w-4 h-4 text-indigo-600 bg-stone-900 border-stone-600 rounded cursor-pointer">
+                        <span class="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Objectif :</span>
+                        <input type="text" id="goal-name" onchange="window.updateGoal()" placeholder="Ex: Acheter un PC..." class="bg-transparent border-b border-stone-600 focus:border-indigo-500 text-white text-xs w-32 outline-none placeholder-stone-600">
+                        <input type="number" id="goal-input" onchange="window.updateGoal()" class="bg-stone-900 border border-stone-600 rounded px-2 py-0.5 text-white w-20 text-xs font-mono" value="1000">
+                        <span class="text-[10px] font-bold text-stone-400">€</span>
+                        <span id="goal-percent" class="text-xs font-black text-indigo-400 ml-auto hidden">0%</span>
+                    </div>
+                    <div id="goal-bar-container" class="w-full bg-stone-900 rounded-full h-2.5 border border-stone-700 overflow-hidden hidden">
+                        <div id="goal-bar" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-500 w-0"></div>
+                    </div>
+                </div>
+
+                <button onclick="window.exportPDF()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold px-4 py-3 rounded-xl transition shadow-lg flex items-center gap-2 whitespace-nowrap">
+                    <span class="icon-symbol">📄</span> Export PDF
+                </button>
+            </div>
+
             <div class="grid grid-cols-3 gap-4">
                 <div class="bg-stone-800/50 p-5 rounded-3xl border border-stone-700 text-center shadow-sm">
-                    <p class="text-[10px] sm:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Entrées Totales</p>
+                    <p class="text-[10px] sm:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Entrées (Période)</p>
                     <p id="kpi-incomes" class="text-lg sm:text-2xl font-black text-emerald-400">0 €</p>
                 </div>
                 <div class="bg-stone-800/50 p-5 rounded-3xl border border-stone-700 text-center shadow-sm">
-                    <p class="text-[10px] sm:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Sorties Totales</p>
+                    <p class="text-[10px] sm:text-xs font-bold text-stone-500 uppercase tracking-widest mb-1">Sorties (Période)</p>
                     <p id="kpi-expenses" class="text-lg sm:text-2xl font-black text-rose-400">0 €</p>
                 </div>
                 <div class="bg-indigo-900/30 p-5 rounded-3xl border border-indigo-800/50 text-center shadow-inner relative overflow-hidden">
@@ -61,34 +85,35 @@
                 </div>
             </div>
 
-            <div class="bg-stone-800 p-6 rounded-3xl border border-stone-700 shadow-lg">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-sm font-bold text-stone-400 uppercase tracking-widest">Évolution de la Trésorerie</h2>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 bg-stone-800 p-6 rounded-3xl border border-stone-700 shadow-lg">
+                    <h2 class="text-sm font-bold text-stone-400 uppercase tracking-widest mb-4">Évolution de la Trésorerie</h2>
+                    <div class="chart-container"><canvas id="financeChart"></canvas></div>
                 </div>
-                <div class="chart-container">
-                    <canvas id="financeChart"></canvas>
+                <div class="lg:col-span-1 bg-stone-800 p-6 rounded-3xl border border-stone-700 shadow-lg flex flex-col items-center justify-center">
+                    <h2 class="text-sm font-bold text-stone-400 uppercase tracking-widest mb-4 w-full text-left">Répartition Sorties</h2>
+                    <div class="doughnut-container w-full"><canvas id="categoryChart"></canvas></div>
                 </div>
             </div>
 
             <div>
-                <div class="flex items-center justify-between mb-6 mt-10">
+                <div class="flex items-center justify-between mb-6 mt-10" data-html2canvas-ignore>
                     <h2 class="text-2xl font-bold text-white tracking-tight">Détails mensuels</h2>
                     <button onclick="window.addNextMonth()" class="text-sm font-bold bg-stone-700 hover:bg-stone-600 text-white px-4 py-2 rounded-xl transition shadow-sm border border-stone-600">
                         + Projeter un mois
                     </button>
                 </div>
-                <div id="monthly-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                <div id="monthly-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"></div>
             </div>
         </div>
 
-        <div class="lg:col-span-4">
+        <div class="xl:col-span-4" data-html2canvas-ignore>
             <div class="bg-stone-800 p-6 rounded-3xl border border-stone-700 shadow-xl sticky top-24">
-                
-                <h2 class="text-lg font-black text-white mb-6 flex items-center gap-2">
+                <h2 id="form-title" class="text-lg font-black text-white mb-6 flex items-center gap-2">
                     <span class="icon-symbol text-indigo-400">⚡</span> Ajouter un flux
                 </h2>
 
-                <form onsubmit="window.handleAddTransaction(event)" class="space-y-4 mb-8">
+                <form onsubmit="window.handleAddTransaction(event)" id="transaction-form" class="space-y-4 mb-8">
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-[10px] font-bold text-stone-400 mb-1.5 uppercase tracking-widest">Mois</label>
@@ -96,7 +121,7 @@
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-stone-400 mb-1.5 uppercase tracking-widest">Type</label>
-                            <select id="form-type" class="w-full p-3 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm focus:border-indigo-500 outline-none transition" required>
+                            <select id="form-type" onchange="window.updateCategoryOptions()" class="w-full p-3 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm focus:border-indigo-500 outline-none transition" required>
                                 <option value="expenses">🔴 Sortie</option>
                                 <option value="incomes">🟢 Entrée</option>
                             </select>
@@ -104,8 +129,13 @@
                     </div>
 
                     <div>
+                        <label class="block text-[10px] font-bold text-stone-400 mb-1.5 uppercase tracking-widest">Catégorie</label>
+                        <select id="form-category" class="w-full p-3 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm focus:border-indigo-500 outline-none transition" required></select>
+                    </div>
+
+                    <div>
                         <label class="block text-[10px] font-bold text-stone-400 mb-1.5 uppercase tracking-widest">Libellé</label>
-                        <input type="text" id="form-label" placeholder="Ex: Salaire, Loyer, McDo..." class="w-full p-3 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm focus:border-indigo-500 outline-none transition placeholder-stone-600" required>
+                        <input type="text" id="form-label" placeholder="Ex: EFREI, McDo..." class="w-full p-3 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm focus:border-indigo-500 outline-none transition placeholder-stone-600" required>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3">
@@ -114,14 +144,37 @@
                             <input type="number" id="form-amount" step="0.01" min="0" placeholder="0.00" class="w-full p-3 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm font-mono focus:border-indigo-500 outline-none transition placeholder-stone-600" required>
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold text-stone-400 mb-1.5 uppercase tracking-widest">Jour du mois</label>
+                            <label class="block text-[10px] font-bold text-stone-400 mb-1.5 uppercase tracking-widest">Jour</label>
                             <input type="number" id="form-day" min="1" max="31" placeholder="Ex: 5" class="w-full p-3 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm font-mono focus:border-indigo-500 outline-none transition placeholder-stone-600" required>
                         </div>
                     </div>
 
-                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-indigo-900/20 mt-4 flex justify-center items-center gap-2">
-                        Valider l'opération
-                    </button>
+                    <div id="recurring-container" class="mt-4 pt-4 border-t border-stone-700">
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="form-recurring" onchange="window.toggleRecurringOptions()" class="w-4 h-4 text-indigo-600 bg-stone-900 border-stone-600 rounded focus:ring-indigo-500 cursor-pointer">
+                            <label for="form-recurring" class="text-xs text-stone-400 cursor-pointer font-medium hover:text-stone-300">🔄 Répéter cette opération</label>
+                        </div>
+                        
+                        <div id="recurring-duration-container" class="hidden mt-3 pl-6">
+                            <label class="block text-[10px] font-bold text-stone-500 mb-1.5 uppercase tracking-widest">Pendant combien de temps ?</label>
+                            <select id="form-recurring-duration" class="w-full p-2.5 rounded-xl border border-stone-600 bg-stone-900 text-white text-sm focus:border-indigo-500 outline-none transition">
+                                <option value="all">Tous les mois actuellement affichés</option>
+                                <option value="2">2 mois (Ce mois-ci + le suivant)</option>
+                                <option value="3">3 mois</option>
+                                <option value="6">6 mois</option>
+                                <option value="12">1 an (12 mois)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 pt-2">
+                        <button type="submit" id="submit-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-indigo-900/20 flex justify-center items-center gap-2">
+                            Valider l'opération
+                        </button>
+                        <button type="button" id="cancel-edit-btn" onclick="window.cancelEdit()" class="hidden bg-stone-700 hover:bg-stone-600 text-stone-300 font-bold py-3.5 px-4 rounded-xl transition shadow-lg flex justify-center items-center">
+                            ✖
+                        </button>
+                    </div>
                 </form>
 
                 <div class="mt-8 pt-6 border-t border-stone-700">
@@ -129,9 +182,8 @@
                         <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Édition rapide</h3>
                         <button onclick="window.resetData()" class="text-xs font-bold text-rose-500 hover:text-rose-400 transition">Tout effacer</button>
                     </div>
-                    <div id="editor-lists-container" class="max-h-72 overflow-y-auto pr-2 space-y-3"></div>
+                    <div id="editor-lists-container" class="max-h-80 overflow-y-auto pr-2 space-y-3"></div>
                 </div>
-
             </div>
         </div>
 
