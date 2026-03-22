@@ -407,8 +407,9 @@ function buildMonthlyCards() {
 
         const incRows = month.incomes.details.length
             ? month.incomes.details.map(item => `
-                <li class="flex justify-between items-start gap-2 text-zinc-300">
-                    <div class="min-w-0">
+                <li class="flex items-start gap-2.5 text-zinc-300">
+                    <span class="text-[10px] font-mono font-semibold text-zinc-500 bg-zinc-800 rounded px-1.5 py-0.5 shrink-0 mt-0.5 min-w-[2rem] text-center">${String(item.day).padStart(2,'0')}</span>
+                    <div class="min-w-0 flex-1">
                         <span class="font-medium text-xs block truncate">${sanitize(item.label)}</span>
                         <span class="text-[10px] text-zinc-500 block">${sanitize(item.category)}</span>
                     </div>
@@ -418,8 +419,9 @@ function buildMonthlyCards() {
 
         const expRows = month.expenses.details.length
             ? month.expenses.details.map(item => `
-                <li class="flex justify-between items-start gap-2 text-zinc-300">
-                    <div class="min-w-0">
+                <li class="flex items-start gap-2.5 text-zinc-300">
+                    <span class="text-[10px] font-mono font-semibold text-zinc-500 bg-zinc-800 rounded px-1.5 py-0.5 shrink-0 mt-0.5 min-w-[2rem] text-center">${String(item.day).padStart(2,'0')}</span>
+                    <div class="min-w-0 flex-1">
                         <span class="font-medium text-xs block truncate">${sanitize(item.label)}</span>
                         <span class="text-[10px] text-zinc-500 block">${sanitize(item.category)}</span>
                     </div>
