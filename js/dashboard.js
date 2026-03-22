@@ -5,7 +5,9 @@ import { supabase } from './supabase-config.js';
 let financialData = null;
 let myChartInstance = null;
 let categoryChartInstance = null;
+let incomeChartInstance = null;
 let editingTransaction = null;
+let drawerOpen = false;
 
 const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
                     'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
@@ -24,7 +26,7 @@ supabase.auth.getSession().then(({ data: { session } }) => {
     }
 });
 
-supabase.auth.onAuthStateChange((event, session) => {
+supabase.auth.onAuthStateChange((event) => {
     if (event === 'SIGNED_OUT') window.location.href = 'index.html';
 });
 
@@ -33,14 +35,14 @@ function generateDefaultData() {
     const d = new Date();
     const currentMonth = monthNames[d.getMonth()];
     const currentYear  = d.getFullYear();
-    const currentId    = slugifyMonth(currentMonth, currentYear);
     return {
         summary: {
             totalIncomes: 0, totalExpenses: 0, finalBalance: 0,
             savingsGoal: 1000, goalName: 'Mon premier objectif', goalActive: false
         },
         months: [{
-            id: currentId, name: currentMonth, year: currentYear, status: 'standard',
+            id: slugifyMonth(currentMonth, currentYear),
+            name: currentMonth, year: currentYear, status: 'standard',
             incomes:  { total: 0, details: [] },
             expenses: { total: 0, details: [] },
             endBalance: 0,
@@ -49,7 +51,6 @@ function generateDefaultData() {
     };
 }
 
-// Normalisation robuste : "Août 2026" → "aout-2026"
 function slugifyMonth(name, year) {
     return name.toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -62,7 +63,6 @@ const formatEur = (n) => new Intl.NumberFormat('fr-FR', {
     minimumFractionDigits: 0, maximumFractionDigits: 2
 }).format(n);
 
-// Sanitize pour éviter XSS lors des injections HTML
 function sanitize(str) {
     const d = document.createElement('div');
     d.textContent = str ?? '';
@@ -80,7 +80,7 @@ function showSaveStatus(message, classes) {
     el._timer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
 }
 
-// ─── Firestore → Supabase : lecture / écriture ───────────────────────────────
+// ─── Data layer (Supabase) ───────────────────────────────────────────────────
 let currentUserId = null;
 
 async function loadData(userId) {
@@ -94,7 +94,6 @@ async function loadData(userId) {
         .single();
 
     if (error && error.code !== 'PGRST116') {
-        // PGRST116 = no rows (premier login)
         console.error('Erreur chargement :', error);
         showSaveStatus('Erreur de chargement', 'text-rose-400');
         return;
@@ -102,7 +101,6 @@ async function loadData(userId) {
 
     if (data) {
         financialData = data.data;
-        // Migrations de champs manquants
         financialData.summary.savingsGoal  ??= 1000;
         financialData.summary.goalName     ??= 'Objectif';
         financialData.summary.goalActive   ??= false;
@@ -141,9 +139,8 @@ function initFilters() {
     s.innerHTML = ''; e.innerHTML = '';
     financialData.months.forEach((month, i) => {
         const label = `${month.name} ${month.year}`;
-        const o1 = new Option(label, i); o1.className = 'bg-zinc-950';
-        const o2 = new Option(label, i); o2.className = 'bg-zinc-950';
-        s.appendChild(o1); e.appendChild(o2);
+        s.appendChild(new Option(label, i));
+        e.appendChild(new Option(label, i));
     });
     s.value = 0;
     e.value = financialData.months.length - 1;
@@ -181,48 +178,49 @@ function recalculateState() {
         ? filtered[filtered.length - 1].endBalance : 0;
 }
 
-// ─── Objectif ─────────────────────────────────────────────────────────────────
+// ─── Objectif (lié au filtre période) ─────────────────────────────────────────
 window.updateGoal = function () {
-    financialData.summary.goalActive = document.getElementById('goal-active').checked;
-    financialData.summary.goalName   = document.getElementById('goal-name').value || 'Objectif';
-    financialData.summary.savingsGoal = parseFloat(document.getElementById('goal-input').value) || 0;
+    financialData.summary.goalActive   = document.getElementById('goal-active').checked;
+    financialData.summary.goalName     = document.getElementById('goal-name').value || 'Objectif';
+    financialData.summary.savingsGoal  = parseFloat(document.getElementById('goal-input').value) || 0;
     saveData();
     renderGoal();
 };
 
 function renderGoal() {
-    const isActive   = financialData.summary.goalActive;
-    const bar        = document.getElementById('goal-bar');
-    const barWrap    = document.getElementById('goal-bar-container');
-    const pct        = document.getElementById('goal-percent');
-    const nameInput  = document.getElementById('goal-name');
-    const amtInput   = document.getElementById('goal-input');
-    const activeChk  = document.getElementById('goal-active');
+    const bar       = document.getElementById('goal-bar');
+    const barWrap   = document.getElementById('goal-bar-container');
+    const pct       = document.getElementById('goal-percent');
+    const nameInput = document.getElementById('goal-name');
+    const amtInput  = document.getElementById('goal-input');
+    const activeChk = document.getElementById('goal-active');
     if (!bar || !financialData) return;
 
-    activeChk.checked  = isActive;
-    nameInput.value    = financialData.summary.goalName;
-    amtInput.value     = financialData.summary.savingsGoal;
+    const isActive = financialData.summary.goalActive;
+    activeChk.checked = isActive;
+    nameInput.value   = financialData.summary.goalName;
+    amtInput.value    = financialData.summary.savingsGoal;
 
     if (isActive) {
         barWrap.classList.remove('hidden');
         pct.classList.remove('hidden');
+        // Utilise le solde de la période filtrée, pas le solde global
+        const balance = financialData.summary.filteredBalance;
         const goal    = financialData.summary.savingsGoal;
-        const balance = financialData.summary.finalBalance;
         const percent = goal > 0 && balance > 0
             ? Math.min((balance / goal) * 100, 100) : 0;
-        pct.textContent  = `${Math.round(percent)}%`;
-        bar.style.width  = `${percent}%`;
+        pct.textContent = `${Math.round(percent)}%`;
+        bar.style.width = `${percent}%`;
         const done = percent >= 100;
-        bar.className    = `h-1.5 rounded-full transition-all duration-500 ${done ? 'bg-emerald-500' : 'bg-indigo-600'}`;
-        pct.className    = `text-xs font-bold ml-auto ${done ? 'text-emerald-500' : 'text-indigo-400'}`;
+        bar.className = `h-1.5 rounded-full transition-all duration-500 ${done ? 'bg-emerald-500' : 'bg-indigo-600'}`;
+        pct.className = `text-xs font-bold ml-auto shrink-0 ${done ? 'text-emerald-500' : 'text-indigo-400'}`;
     } else {
         barWrap.classList.add('hidden');
         pct.classList.add('hidden');
     }
 }
 
-// ─── Sélecteur de mois du formulaire ─────────────────────────────────────────
+// ─── Sélecteur mois du formulaire ────────────────────────────────────────────
 function updateMonthSelectOptions() {
     const sel = document.getElementById('form-month');
     if (!sel || !financialData) return;
@@ -234,13 +232,14 @@ function updateMonthSelectOptions() {
     if (prev) sel.value = prev;
 }
 
-// ─── App update (point d'entrée principal) ────────────────────────────────────
+// ─── App update ──────────────────────────────────────────────────────────────
 window.updateApp = function (skipSave = false) {
     recalculateState();
     updateMonthSelectOptions();
     populateKPIs();
     renderChart();
     renderCategoryChart();
+    renderIncomeChart();
     buildMonthlyCards();
     renderEditorLists();
     renderGoal();
@@ -251,9 +250,52 @@ window.updateApp = function (skipSave = false) {
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
 function populateKPIs() {
     if (!financialData) return;
-    document.getElementById('kpi-incomes').textContent  = formatEur(financialData.summary.totalIncomes);
-    document.getElementById('kpi-expenses').textContent = formatEur(financialData.summary.totalExpenses);
+    const inc = financialData.summary.totalIncomes;
+    const exp = financialData.summary.totalExpenses;
+
+    document.getElementById('kpi-incomes').textContent  = formatEur(inc);
+    document.getElementById('kpi-expenses').textContent = formatEur(exp);
     document.getElementById('kpi-balance').textContent  = formatEur(financialData.summary.filteredBalance);
+
+    // Taux d'épargne
+    const rateEl = document.getElementById('kpi-savings-rate');
+    if (rateEl) {
+        if (inc > 0) {
+            const rate = Math.round(((inc - exp) / inc) * 100);
+            rateEl.textContent = `${rate}%`;
+            rateEl.className   = `text-xl font-bold tabular-nums ${rate >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+        } else {
+            rateEl.textContent = '—';
+            rateEl.className   = 'text-xl font-bold text-zinc-500';
+        }
+    }
+
+    // Comparaison mois précédent
+    renderComparison();
+}
+
+function renderComparison() {
+    const filtered = getFilteredMonths();
+    if (filtered.length < 2) {
+        document.querySelectorAll('.kpi-trend').forEach(el => el.textContent = '');
+        return;
+    }
+    const current = filtered[filtered.length - 1];
+    const prev    = filtered[filtered.length - 2];
+
+    renderTrend('trend-incomes',  current.incomes.total,  prev.incomes.total);
+    renderTrend('trend-expenses', current.expenses.total, prev.expenses.total, true);
+}
+
+function renderTrend(elId, current, previous, invert = false) {
+    const el = document.getElementById(elId);
+    if (!el || previous === 0) { if (el) el.textContent = ''; return; }
+    const pct   = Math.round(((current - previous) / previous) * 100);
+    const up    = pct >= 0;
+    const good  = invert ? !up : up;
+    const arrow = up ? '\u2191' : '\u2193';
+    el.textContent = `${arrow} ${Math.abs(pct)}%`;
+    el.className   = `text-[10px] font-semibold ${good ? 'text-emerald-500' : 'text-rose-500'}`;
 }
 
 // ─── Graphiques ───────────────────────────────────────────────────────────────
@@ -289,8 +331,7 @@ function renderChart() {
             },
             scales: {
                 x: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa' } },
-                y: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa',
-                    callback: v => v + ' €' } }
+                y: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa', callback: v => v + ' €' } }
             }
         }
     });
@@ -315,7 +356,33 @@ function renderCategoryChart() {
         options: {
             responsive: true, maintainAspectRatio: false, cutout: '75%',
             plugins: {
-                legend: { position: 'right', labels: { color: '#a1a1aa', font: { size: 10 }, boxWidth: 10 } },
+                legend: { position: 'bottom', labels: { color: '#a1a1aa', font: { size: 10 }, boxWidth: 10, padding: 8 } },
+                tooltip: { callbacks: { label: c => ' ' + formatEur(c.parsed) } }
+            }
+        }
+    });
+}
+
+function renderIncomeChart() {
+    const el = document.getElementById('incomeChart');
+    if (!el || !financialData) return;
+    if (incomeChartInstance) incomeChartInstance.destroy();
+    const totals = {};
+    getFilteredMonths().forEach(m =>
+        m.incomes.details.forEach(i => {
+            totals[i.category] = (totals[i.category] ?? 0) + i.amount;
+        })
+    );
+    const cats   = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+    const colors = ['#10b981','#34d399','#6ee7b7','#a7f3d0','#059669','#047857','#065f46','#064e3b'];
+    incomeChartInstance = new Chart(el.getContext('2d'), {
+        type: 'doughnut',
+        data: { labels: cats, datasets: [{ data: cats.map(c => totals[c]),
+            backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '75%',
+            plugins: {
+                legend: { position: 'bottom', labels: { color: '#a1a1aa', font: { size: 10 }, boxWidth: 10, padding: 8 } },
                 tooltip: { callbacks: { label: c => ' ' + formatEur(c.parsed) } }
             }
         }
@@ -361,15 +428,22 @@ function buildMonthlyCards() {
             : '<li class="text-zinc-600 text-[10px] italic">Aucun mouvement</li>';
 
         container.insertAdjacentHTML('beforeend', `
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden flex flex-col shadow-sm">
-                <button class="w-full text-left px-4 py-3.5 flex justify-between items-center bg-zinc-900 hover:bg-zinc-800/50 transition-colors focus:outline-none"
-                        onclick="window.toggleCard('${month.id}')">
+            <div class="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden flex flex-col shadow-sm group">
+                <div class="w-full text-left px-4 py-3.5 flex justify-between items-center bg-zinc-900 hover:bg-zinc-800/50 transition-colors cursor-pointer select-none"
+                     onclick="window.toggleCard('${month.id}')">
                     <div class="flex items-center gap-2.5">
                         <i data-lucide="calendar" class="w-4 h-4 text-zinc-500 shrink-0"></i>
                         <h3 class="font-semibold text-zinc-100 text-sm">${sanitize(month.name)}</h3>
                     </div>
-                    <i data-lucide="chevron-down" class="w-4 h-4 text-zinc-500 transition-transform duration-300" id="chevron-${month.id}"></i>
-                </button>
+                    <div class="flex items-center gap-2">
+                        <span onclick="event.stopPropagation(); window.deleteMonth('${month.id}')"
+                              class="opacity-0 group-hover:opacity-100 p-1 text-zinc-600 hover:text-rose-500 transition-all rounded hover:bg-zinc-800 cursor-pointer"
+                              title="Supprimer ce mois">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </span>
+                        <i data-lucide="chevron-down" class="w-4 h-4 text-zinc-500 transition-transform duration-300" id="chevron-${month.id}"></i>
+                    </div>
+                </div>
                 <div class="px-4 py-2 border-y border-zinc-800 flex justify-between bg-zinc-950/50 text-xs">
                     <span class="text-emerald-500 font-semibold">+ ${formatEur(month.incomes.total)}</span>
                     <span class="text-rose-500 font-semibold">- ${formatEur(month.expenses.total)}</span>
@@ -394,7 +468,27 @@ function buildMonthlyCards() {
     });
 }
 
-// ─── Liste d'édition rapide ───────────────────────────────────────────────────
+// ─── Suppression de mois ──────────────────────────────────────────────────────
+window.deleteMonth = function (monthId) {
+    if (!financialData) return;
+    if (financialData.months.length <= 1) {
+        alert('Impossible de supprimer le dernier mois restant.');
+        return;
+    }
+    const month = financialData.months.find(m => m.id === monthId);
+    if (!month) return;
+    const hasTx = month.incomes.details.length + month.expenses.details.length;
+    const msg = hasTx
+        ? `Supprimer ${month.name} ${month.year} et ses ${hasTx} transaction(s) ?`
+        : `Supprimer ${month.name} ${month.year} ?`;
+    if (!confirm(msg)) return;
+    financialData.months = financialData.months.filter(m => m.id !== monthId);
+    initFilters();
+    document.getElementById('filter-end').value = financialData.months.length - 1;
+    window.updateApp();
+};
+
+// ─── Liste d'édition rapide (design amélioré) ─────────────────────────────────
 function renderEditorLists() {
     const container = document.getElementById('editor-lists-container');
     if (!container || !financialData) return;
@@ -413,31 +507,61 @@ function renderEditorLists() {
         if (!all.length) return;
 
         let rows = all.map(item => `
-            <li class="flex items-center justify-between gap-2 py-1.5 border-b border-zinc-800/50 last:border-0">
-                <div class="min-w-0 flex-1">
-                    <span class="${item.type === 'incomes' ? 'text-emerald-500' : 'text-rose-500'} font-bold mr-1 text-xs">${item.type === 'incomes' ? '+' : '−'}</span>
-                    <span class="text-zinc-300 text-xs truncate">${sanitize(item.label)}</span>
-                    <span class="text-zinc-600 text-[10px] ml-1">${formatEur(item.amount)}</span>
+            <li class="flex items-center justify-between gap-2 px-3 py-2 hover:bg-zinc-800/50 transition-colors rounded-md">
+                <div class="min-w-0 flex-1 flex items-center gap-2">
+                    <span class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0
+                        ${item.type === 'incomes'
+                            ? 'bg-emerald-500/10 text-emerald-500'
+                            : 'bg-rose-500/10 text-rose-500'}">
+                        ${item.type === 'incomes' ? '+' : '−'}
+                    </span>
+                    <span class="text-zinc-200 text-xs truncate">${sanitize(item.label)}</span>
+                    <span class="text-zinc-600 text-[10px] font-mono shrink-0">${formatEur(item.amount)}</span>
                 </div>
-                <div class="flex gap-1 shrink-0">
+                <div class="flex gap-0.5 shrink-0">
                     <button onclick="window.editTransaction('${month.id}','${item.type}',${item.index})"
-                            class="p-1 text-zinc-500 hover:text-indigo-400 transition-colors rounded hover:bg-zinc-800">
+                            class="p-1.5 text-zinc-500 hover:text-indigo-400 transition-colors rounded hover:bg-zinc-700">
                         <i data-lucide="pencil" class="w-3 h-3"></i>
                     </button>
                     <button onclick="window.deleteTransaction('${month.id}','${item.type}',${item.index})"
-                            class="p-1 text-zinc-500 hover:text-rose-500 transition-colors rounded hover:bg-zinc-800">
+                            class="p-1.5 text-zinc-500 hover:text-rose-500 transition-colors rounded hover:bg-zinc-700">
                         <i data-lucide="trash-2" class="w-3 h-3"></i>
                     </button>
                 </div>
             </li>`).join('');
 
         container.insertAdjacentHTML('beforeend', `
-            <div class="mb-3">
-                <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">${sanitize(month.name)} ${month.year}</h4>
-                <ul>${rows}</ul>
+            <div class="bg-zinc-950/50 rounded-lg border border-zinc-800/70 overflow-hidden">
+                <div class="px-3 py-2 bg-zinc-900/80 border-b border-zinc-800/70">
+                    <h4 class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">${sanitize(month.name)} ${month.year}</h4>
+                </div>
+                <ul class="py-1">${rows}</ul>
             </div>`);
     });
 }
+
+// ─── Drawer (panneau coulissant) ──────────────────────────────────────────────
+window.toggleDrawer = function () {
+    drawerOpen = !drawerOpen;
+    const drawer   = document.getElementById('transaction-drawer');
+    const overlay  = document.getElementById('drawer-overlay');
+    if (!drawer) return;
+    if (drawerOpen) {
+        drawer.classList.remove('translate-x-full');
+        drawer.classList.add('translate-x-0');
+        overlay.classList.remove('hidden');
+        setTimeout(() => overlay.classList.add('opacity-100'), 10);
+    } else {
+        drawer.classList.add('translate-x-full');
+        drawer.classList.remove('translate-x-0');
+        overlay.classList.remove('opacity-100');
+        setTimeout(() => overlay.classList.add('hidden'), 300);
+    }
+};
+
+window.closeDrawer = function () {
+    if (drawerOpen) window.toggleDrawer();
+};
 
 // ─── Interactions ─────────────────────────────────────────────────────────────
 window.updateCategoryOptions = function () {
@@ -462,6 +586,9 @@ window.editTransaction = function (monthId, type, index) {
     if (!month) return;
     const item = month[type].details[index];
 
+    // Ouvrir le drawer si fermé
+    if (!drawerOpen) window.toggleDrawer();
+
     document.getElementById('form-month').value    = monthId;
     document.getElementById('form-type').value     = type;
     window.updateCategoryOptions();
@@ -473,7 +600,7 @@ window.editTransaction = function (monthId, type, index) {
     editingTransaction = { monthId, type, index };
 
     document.getElementById('form-title').innerHTML =
-        '<i data-lucide="pencil" class="w-5 h-5 text-amber-500"></i> Éditer la transaction';
+        '<i data-lucide="pencil" class="w-4 h-4 text-amber-500"></i> Éditer la transaction';
     if (window.lucide) window.lucide.createIcons();
 
     const btn = document.getElementById('submit-btn');
@@ -490,7 +617,7 @@ window.cancelEdit = function () {
     editingTransaction = null;
     document.getElementById('transaction-form').reset();
     document.getElementById('form-title').innerHTML =
-        '<i data-lucide="plus-circle" class="w-5 h-5 text-indigo-500"></i> Saisir une transaction';
+        '<i data-lucide="plus-circle" class="w-4 h-4 text-indigo-500"></i> Nouvelle transaction';
     if (window.lucide) window.lucide.createIcons();
 
     const btn = document.getElementById('submit-btn');
@@ -506,20 +633,22 @@ window.cancelEdit = function () {
 };
 
 window.toggleRecurringOptions = function () {
-    const show = document.getElementById('form-recurring').checked;
-    document.getElementById('recurring-duration-container').classList.toggle('hidden', !show);
+    const isCustom = document.getElementById('form-recurring').checked;
+    document.getElementById('recurring-duration-container').classList.toggle('hidden', !isCustom);
+    // Quand on active la récurrence, afficher les options de fréquence
+    const freqContainer = document.getElementById('recurring-freq-container');
+    if (freqContainer) freqContainer.classList.toggle('hidden', !isCustom);
 };
 
 window.addNextMonth = function (skipRender = false) {
     if (!financialData) return;
-    const last      = financialData.months[financialData.months.length - 1];
-    const lastIdx   = monthNames.findIndex(m => m === last.name);
-    const nextIdx   = (lastIdx + 1) % 12;
-    const nextName  = monthNames[nextIdx];
-    const nextYear  = nextIdx === 0 ? last.year + 1 : last.year;
-    const nextId    = slugifyMonth(nextName, nextYear);
+    const last     = financialData.months[financialData.months.length - 1];
+    const lastIdx  = monthNames.findIndex(m => m === last.name);
+    const nextIdx  = (lastIdx + 1) % 12;
+    const nextName = monthNames[nextIdx];
+    const nextYear = nextIdx === 0 ? last.year + 1 : last.year;
+    const nextId   = slugifyMonth(nextName, nextYear);
 
-    // Éviter les doublons
     if (financialData.months.some(m => m.id === nextId)) return;
 
     financialData.months.push({
@@ -546,7 +675,6 @@ window.handleAddTransaction = function (e) {
     const amount   = parseFloat(document.getElementById('form-amount').value);
     const day      = parseInt(document.getElementById('form-day').value);
 
-    // Validation basique
     if (!label || isNaN(amount) || amount <= 0 || isNaN(day) || day < 1 || day > 31) {
         alert('Vérifiez les champs : montant > 0, jour entre 1 et 31, description requise.');
         return;
@@ -559,13 +687,24 @@ window.handleAddTransaction = function (e) {
     } else {
         const isRecurring = document.getElementById('form-recurring')?.checked ?? false;
         const duration    = document.getElementById('form-recurring-duration')?.value ?? 'all';
+        const frequency   = parseInt(document.getElementById('form-recurring-freq')?.value ?? '1');
         const startIdx    = financialData.months.findIndex(m => m.id === monthId);
 
         if (startIdx !== -1) {
             if (isRecurring) {
-                let limit = duration === 'all' ? financialData.months.length : startIdx + parseInt(duration);
-                while (financialData.months.length < limit) window.addNextMonth(true);
-                for (let i = startIdx; i < limit; i++) {
+                let endIdx;
+                if (duration === 'all') {
+                    endIdx = financialData.months.length;
+                } else if (duration === 'custom') {
+                    const customMonths = parseInt(document.getElementById('form-recurring-custom')?.value ?? '3');
+                    endIdx = startIdx + customMonths;
+                } else {
+                    endIdx = startIdx + parseInt(duration);
+                }
+                // Créer les mois manquants
+                while (financialData.months.length < endIdx) window.addNextMonth(true);
+                // Appliquer avec la fréquence
+                for (let i = startIdx; i < endIdx; i += frequency) {
                     financialData.months[i][type].details.push({ label, amount, day, category });
                 }
             } else {
@@ -667,7 +806,6 @@ window.exportPDF = function () {
     });
 
     html += '</div>';
-
     const div = document.createElement('div');
     div.innerHTML = html;
 
