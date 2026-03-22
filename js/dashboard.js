@@ -11,24 +11,26 @@ let financialData = null;
 let editingTransaction = null; 
 
 const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+// NOUVEAU : Catégories sobres sans emojis
 const categoriesDef = {
-    expenses: ['🍔 Alimentation', '🏠 Logement', '🚌 Transport', '🎓 Scolarité', '🎮 Loisirs', '📱 Abonnements', '💳 Frais bancaires', 'Autre'],
-    incomes: ['💰 Salaire', '🏛️ Bourse/Aides', '🔄 Remboursement', '🎁 Cadeau', 'Autre']
+    expenses: ['Alimentation', 'Logement', 'Transport', 'Scolarité', 'Loisirs', 'Abonnements', 'Frais bancaires', 'Autre'],
+    incomes: ['Salaire', 'Bourse / Aides', 'Remboursement', 'Cadeau', 'Autre']
 };
 
 const defaultData = {
-    summary: { totalIncomes: 0, totalExpenses: 0, finalBalance: 0, savingsGoal: 1000, goalName: 'Nouveau PC', goalActive: false },
+    summary: { totalIncomes: 0, totalExpenses: 0, finalBalance: 0, savingsGoal: 1000, goalName: 'Objectif', goalActive: false },
     months: [
         {
             id: 'mars-2026', name: 'Mars', year: 2026, status: 'critical',
             incomes: { total: 0, details: [] }, 
-            expenses: { total: 0, details: [{label: '⚠️ PayPal', amount: 124.50, day: 26, category: '💳 Frais bancaires'}]},
-            endBalance: 0, note: "Couvert par le découvert."
+            expenses: { total: 0, details: [{label: 'Frais bancaires', amount: 124.50, day: 26, category: 'Frais bancaires'}]},
+            endBalance: 0, note: "Couvert par la facilité de caisse."
         },
         {
             id: 'avril-2026', name: 'Avril', year: 2026, status: 'standard',
-            incomes: { total: 0, details: [{label: 'Bourse', amount: 382, day: 3, category: '🏛️ Bourse/Aides'}, {label: 'Salaire', amount: 240, day: 3, category: '💰 Salaire'}]},
-            expenses: { total: 0, details: [{label: 'Navigo', amount: 42, day: 1, category: '🚌 Transport'}, {label: 'EFREI', amount: 670, day: 15, category: '🎓 Scolarité'}]},
+            incomes: { total: 0, details: [{label: 'Bourse', amount: 382, day: 3, category: 'Bourse / Aides'}, {label: 'Salaire', amount: 240, day: 3, category: 'Salaire'}]},
+            expenses: { total: 0, details: [{label: 'Transport', amount: 42, day: 1, category: 'Transport'}, {label: 'Scolarité', amount: 670, day: 15, category: 'Scolarité'}]},
             endBalance: 0, note: ""
         }
     ]
@@ -36,11 +38,14 @@ const defaultData = {
 
 const formatEur = (num) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(num);
 
+// NOUVEAU : Fonction utilitaire pour nettoyer les anciens emojis de ta base de données à l'affichage
+const cleanCategory = (cat) => cat ? cat.replace(/[\u1000-\uFFFF]+/g, '').trim() : 'Autre';
+
 function showSaveStatus(message, classes) {
     const statusBadge = document.getElementById('save-status');
     if(!statusBadge) return;
     statusBadge.textContent = message;
-    statusBadge.className = `text-xs px-2 py-0.5 rounded border ml-3 transition-opacity duration-300 ${classes}`;
+    statusBadge.className = `text-[10px] px-2 py-0.5 rounded border border-zinc-800 ml-3 transition-opacity duration-300 ${classes}`;
     statusBadge.style.display = 'inline-block';
     statusBadge.style.opacity = 1;
     setTimeout(() => { statusBadge.style.opacity = 0; }, 3000);
@@ -57,16 +62,15 @@ onAuthStateChanged(auth, (user) => {
 
 async function loadDataFromCloud() {
     if (!myDocRef) return;
-    showSaveStatus('Connexion...', 'text-stone-400 border-stone-600 bg-stone-800');
+    showSaveStatus('Synchronisation...', 'text-zinc-400');
     try {
         const docSnap = await getDoc(myDocRef);
         if (docSnap.exists()) {
             financialData = docSnap.data();
-            // Rétrocompatibilité si les données manquent
             if(financialData.summary.savingsGoal === undefined) financialData.summary.savingsGoal = 1000;
-            if(financialData.summary.goalName === undefined) financialData.summary.goalName = 'Mon objectif';
+            if(financialData.summary.goalName === undefined) financialData.summary.goalName = 'Objectif';
             if(financialData.summary.goalActive === undefined) financialData.summary.goalActive = false;
-            showSaveStatus('À jour', 'text-indigo-400 border-indigo-800 bg-indigo-900/50');
+            showSaveStatus('À jour', 'text-indigo-400');
         } else {
             financialData = JSON.parse(JSON.stringify(defaultData));
             await saveDataToCloud(); 
@@ -81,10 +85,10 @@ async function loadDataFromCloud() {
 
 async function saveDataToCloud() {
     if (!myDocRef || !financialData) return;
-    showSaveStatus('Sauvegarde...', 'text-amber-400 border-amber-800 bg-amber-900/50');
+    showSaveStatus('Sauvegarde...', 'text-amber-400');
     try {
         await setDoc(myDocRef, financialData);
-        showSaveStatus('Sauvegardé', 'text-emerald-400 border-emerald-800 bg-emerald-900/50');
+        showSaveStatus('Sauvegardé', 'text-emerald-400');
     } catch (error) {
         console.error("Erreur :", error);
     }
@@ -101,10 +105,10 @@ function initFilters() {
         const option1 = document.createElement('option');
         const option2 = document.createElement('option');
         option1.value = index; option1.textContent = `${month.name} ${month.year}`;
-        option1.className = "bg-stone-900 text-white"; // Correction du bug blanc
+        option1.className = "bg-zinc-950 text-zinc-200"; 
         
         option2.value = index; option2.textContent = `${month.name} ${month.year}`;
-        option2.className = "bg-stone-900 text-white"; // Correction du bug blanc
+        option2.className = "bg-zinc-950 text-zinc-200"; 
         
         startSelect.appendChild(option1);
         endSelect.appendChild(option2);
@@ -150,7 +154,6 @@ function recalculateState() {
     financialData.summary.totalIncomes = filteredInc;
     financialData.summary.totalExpenses = filteredExp;
     
-    // NOUVEAU : On récupère le solde du dernier mois du filtre !
     if (filteredMonths.length > 0) {
         financialData.summary.filteredBalance = filteredMonths[filteredMonths.length - 1].endBalance;
     } else {
@@ -158,7 +161,6 @@ function recalculateState() {
     }
 }
 
-// GESTION COMPLÈTE DE L'OBJECTIF
 window.updateGoal = function() {
     const isActive = document.getElementById('goal-active').checked;
     const name = document.getElementById('goal-name').value || 'Objectif';
@@ -186,7 +188,6 @@ function renderGoal() {
     goalName.value = financialData.summary.goalName;
     goalInput.value = financialData.summary.savingsGoal;
     
-    // Si la case est cochée, on affiche la barre de progression
     if (financialData.summary.goalActive) {
         goalBarContainer.classList.remove('hidden');
         goalPercent.classList.remove('hidden');
@@ -203,13 +204,12 @@ function renderGoal() {
         
         if(percent >= 100) {
             goalBar.classList.replace('bg-indigo-600', 'bg-emerald-500');
-            goalPercent.classList.replace('text-indigo-400', 'text-emerald-400');
+            goalPercent.classList.replace('text-indigo-400', 'text-emerald-500');
         } else {
             goalBar.classList.replace('bg-emerald-500', 'bg-indigo-600');
-            goalPercent.classList.replace('text-emerald-400', 'text-indigo-400');
+            goalPercent.classList.replace('text-emerald-500', 'text-indigo-400');
         }
     } else {
-        // Sinon, on la cache
         goalBarContainer.classList.add('hidden');
         goalPercent.classList.add('hidden');
     }
@@ -237,6 +237,7 @@ window.updateApp = function(skipSave = false) {
     buildMonthlyCards(); 
     renderEditorLists();
     renderGoal();
+    if(window.lucide) window.lucide.createIcons(); // Rendu des icônes SVG
     if(!skipSave) { saveDataToCloud(); } 
 }
 
@@ -244,7 +245,6 @@ function populateKPIs() {
     if(!financialData) return;
     if(document.getElementById('kpi-incomes')) document.getElementById('kpi-incomes').textContent = formatEur(financialData.summary.totalIncomes);
     if(document.getElementById('kpi-expenses')) document.getElementById('kpi-expenses').textContent = formatEur(financialData.summary.totalExpenses);
-    // NOUVEAU : On affiche le solde filtré
     if(document.getElementById('kpi-balance')) document.getElementById('kpi-balance').textContent = formatEur(financialData.summary.filteredBalance);
 }
 
@@ -260,20 +260,21 @@ function renderChart() {
     const expenseData = filteredMonths.map(m => m.expenses.total);
     const balanceData = filteredMonths.map(m => m.endBalance);
 
+    // Ajustement des couleurs pour le thème Zinc Pro
     myChartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [
-                { type: 'line', label: 'Solde Fin', data: balanceData, borderColor: '#818cf8', backgroundColor: '#818cf8', borderWidth: 3, pointRadius: 5, fill: false, tension: 0.3 },
-                { type: 'bar', label: 'Entrées', data: incomeData, backgroundColor: 'rgba(52, 211, 153, 0.8)', borderColor: '#34d399', borderWidth: 1, borderRadius: 4 },
-                { type: 'bar', label: 'Sorties', data: expenseData, backgroundColor: 'rgba(251, 113, 133, 0.8)', borderColor: '#fb7185', borderWidth: 1, borderRadius: 4 }
+                { type: 'line', label: 'Solde Fin', data: balanceData, borderColor: '#6366f1', backgroundColor: '#6366f1', borderWidth: 2, pointRadius: 4, fill: false, tension: 0.3 },
+                { type: 'bar', label: 'Entrées', data: incomeData, backgroundColor: 'rgba(16, 185, 129, 0.8)', borderColor: '#10b981', borderWidth: 1, borderRadius: 2 },
+                { type: 'bar', label: 'Sorties', data: expenseData, backgroundColor: 'rgba(244, 63, 94, 0.8)', borderColor: '#f43f5e', borderWidth: 1, borderRadius: 2 }
             ]
         },
         options: {
-            responsive: true, maintainAspectRatio: false, color: '#a8a29e', interaction: { mode: 'index', intersect: false },
-            plugins: { tooltip: { backgroundColor: 'rgba(28, 25, 23, 0.95)', titleColor: '#fff', bodyColor: '#d6d3d1', callbacks: { label: (c) => (c.dataset.label ? c.dataset.label + ': ' : '') + formatEur(c.parsed.y) } }, legend: {labels:{color: '#a8a29e'}} },
-            scales: { x: { grid: { color: '#44403c' }, ticks: { color: '#a8a29e' } }, y: { grid: { color: '#44403c' }, ticks: { color: '#a8a29e', callback: function(value) { return value + ' €'; } } } }
+            responsive: true, maintainAspectRatio: false, color: '#a1a1aa', interaction: { mode: 'index', intersect: false },
+            plugins: { tooltip: { backgroundColor: 'rgba(24, 24, 27, 0.95)', titleColor: '#fff', bodyColor: '#d4d4d8', callbacks: { label: (c) => (c.dataset.label ? c.dataset.label + ': ' : '') + formatEur(c.parsed.y) } }, legend: {labels:{color: '#a1a1aa'}} },
+            scales: { x: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa' } }, y: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa', callback: function(value) { return value + ' €'; } } } }
         }
     });
 }
@@ -289,7 +290,7 @@ function renderCategoryChart() {
     
     filteredMonths.forEach(month => {
         month.expenses.details.forEach(exp => {
-            const cat = exp.category || 'Autre';
+            const cat = cleanCategory(exp.category);
             if(!categoryTotals[cat]) categoryTotals[cat] = 0;
             categoryTotals[cat] += exp.amount;
         });
@@ -298,7 +299,8 @@ function renderCategoryChart() {
     const sortedCategories = Object.keys(categoryTotals).sort((a, b) => categoryTotals[b] - categoryTotals[a]);
     const data = sortedCategories.map(cat => categoryTotals[cat]);
     const labels = sortedCategories;
-    const colors = ['#f43f5e', '#ec4899', '#d946ef', '#a855f7', '#8b5cf6', '#6366f1', '#3b82f6', '#0ea5e9'];
+    // Couleurs plus sobres
+    const colors = ['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#3b82f6', '#0ea5e9'];
 
     categoryChartInstance = new Chart(ctx, {
         type: 'doughnut',
@@ -306,7 +308,7 @@ function renderCategoryChart() {
         options: {
             responsive: true, maintainAspectRatio: false, cutout: '75%',
             plugins: { 
-                legend: { position: 'right', labels: { color: '#a8a29e', font: {size: 10}, boxWidth: 10 } },
+                legend: { position: 'right', labels: { color: '#a1a1aa', font: {size: 10}, boxWidth: 10 } },
                 tooltip: { callbacks: { label: (c) => ' ' + formatEur(c.parsed) } }
             }
         }
@@ -323,57 +325,51 @@ function buildMonthlyCards() {
 
     filteredMonths.forEach((month) => {
         if (month.year !== currentDisplayedYear) {
-            container.insertAdjacentHTML('beforeend', `<div class="col-span-1 md:col-span-2 lg:col-span-3 mt-6 mb-2 flex items-center"><h2 class="text-3xl font-black text-stone-600 mr-4 tracking-tight">${month.year}</h2><div class="h-px bg-stone-700 flex-grow"></div></div>`);
+            container.insertAdjacentHTML('beforeend', `<div class="col-span-1 md:col-span-2 lg:col-span-3 mt-6 mb-2 flex items-center"><h2 class="text-xl font-bold text-zinc-500 mr-4 tracking-tight">${month.year}</h2><div class="h-px bg-zinc-800 flex-grow"></div></div>`);
             currentDisplayedYear = month.year;
         }
 
-        let headerClass = 'bg-stone-700 text-stone-200 border-stone-600'; let icon = '📅';
-        if(month.status === 'critical') { headerClass = 'bg-rose-900/30 text-rose-300 border-rose-800/50'; icon = '⚠️'; }
-        if(month.status === 'landing') { headerClass = 'bg-teal-900/40 text-teal-300 border-teal-800'; icon = '🏁'; }
-        if(month.status === 'savings') { headerClass = 'bg-indigo-900/40 text-indigo-300 border-indigo-800'; icon = '📈'; }
-
         const cardHTML = `
-            <div class="bg-stone-800 rounded-2xl border border-stone-700 overflow-hidden flex flex-col h-full shadow-lg">
-                <button class="w-full text-left px-5 py-4 flex justify-between items-center focus:outline-none ${headerClass}" onclick="window.toggleCard('${month.id}')">
-                    <div class="flex items-center"><span class="mr-3 text-xl icon-symbol">${icon}</span><h3 class="font-bold text-lg">${month.name}</h3></div><span class="text-stone-400 transform transition-transform duration-300" id="chevron-${month.id}">▼</span>
+            <div class="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden flex flex-col h-full shadow-sm">
+                <button class="w-full text-left px-5 py-4 flex justify-between items-center focus:outline-none bg-zinc-900 hover:bg-zinc-800/50 transition-colors" onclick="window.toggleCard('${month.id}')">
+                    <div class="flex items-center"><i data-lucide="calendar" class="w-4 h-4 mr-3 text-zinc-400"></i><h3 class="font-semibold text-zinc-100">${month.name}</h3></div><i data-lucide="chevron-down" class="w-4 h-4 text-zinc-500 transform transition-transform duration-300" id="chevron-${month.id}"></i>
                 </button>
-                <div class="px-5 py-4 border-b border-stone-700 flex justify-between text-sm bg-stone-800/50">
-                    <span class="text-emerald-400 font-bold">+ ${formatEur(month.incomes.total)}</span><span class="text-rose-400 font-bold">- ${formatEur(month.expenses.total)}</span>
+                <div class="px-5 py-3 border-b border-t border-zinc-800 flex justify-between text-xs bg-zinc-950/50">
+                    <span class="text-emerald-500 font-semibold">+ ${formatEur(month.incomes.total)}</span><span class="text-rose-500 font-semibold">- ${formatEur(month.expenses.total)}</span>
                 </div>
-                <div id="content-${month.id}" class="month-card-content bg-stone-900/50 flex-grow">
+                <div id="content-${month.id}" class="month-card-content bg-zinc-900/30 flex-grow">
                     <div class="p-5">
-                        <p class="text-xs text-stone-400 italic mb-4 leading-relaxed">${month.note}</p>
                         <div class="mb-5">
-                            <h4 class="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3 border-b border-stone-700 pb-1">Entrées</h4>
-                            <ul class="text-sm space-y-3">
+                            <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 border-b border-zinc-800 pb-1">Encaissements</h4>
+                            <ul class="text-xs space-y-2">
                                 ${month.incomes.details.length ? month.incomes.details.map(item => `
-                                    <li class="flex justify-between items-start text-stone-300">
+                                    <li class="flex justify-between items-start text-zinc-300">
                                         <div class="flex flex-col pr-2">
-                                            <span class="font-medium truncate block max-w-[150px] sm:max-w-[200px]">${item.label}</span>
-                                            <span class="text-[10px] text-stone-500 block">${item.category || 'Autre'}</span>
+                                            <span class="font-medium truncate block max-w-[150px]">${item.label}</span>
+                                            <span class="text-[9px] text-zinc-500 block">${cleanCategory(item.category)}</span>
                                         </div>
-                                        <span class="font-bold text-emerald-300 whitespace-nowrap">${formatEur(item.amount)}</span>
-                                    </li>`).join('') : '<li class="text-stone-500 text-xs italic">Aucune entrée</li>'}
+                                        <span class="font-medium text-emerald-400 whitespace-nowrap">${formatEur(item.amount)}</span>
+                                    </li>`).join('') : '<li class="text-zinc-600 text-[10px] italic">Aucun mouvement</li>'}
                             </ul>
                         </div>
                         <div>
-                            <h4 class="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3 border-b border-stone-700 pb-1">Sorties</h4>
-                            <ul class="text-sm space-y-3">
+                            <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 border-b border-zinc-800 pb-1">Décaissements</h4>
+                            <ul class="text-xs space-y-2">
                                 ${month.expenses.details.length ? month.expenses.details.map(item => `
-                                    <li class="flex justify-between items-start text-stone-300">
+                                    <li class="flex justify-between items-start text-zinc-300">
                                         <div class="flex flex-col pr-2">
-                                            <span class="${item.label.includes('⚠️') ? 'text-amber-400 font-bold' : 'font-medium'} truncate block max-w-[150px] sm:max-w-[200px]">${item.label}</span>
-                                            <span class="text-[10px] text-stone-500 block">${item.category || 'Autre'}</span>
+                                            <span class="font-medium truncate block max-w-[150px]">${item.label}</span>
+                                            <span class="text-[9px] text-zinc-500 block">${cleanCategory(item.category)}</span>
                                         </div>
-                                        <span class="font-bold text-rose-300 whitespace-nowrap">${formatEur(item.amount)}</span>
-                                    </li>`).join('') : '<li class="text-stone-500 text-xs italic">Aucune sortie</li>'}
+                                        <span class="font-medium text-rose-400 whitespace-nowrap">${formatEur(item.amount)}</span>
+                                    </li>`).join('') : '<li class="text-zinc-600 text-[10px] italic">Aucun mouvement</li>'}
                             </ul>
                         </div>
                     </div>
                 </div>
-                <div class="px-5 py-4 mt-auto bg-stone-800 border-t border-stone-700 flex justify-between items-center">
-                    <span class="text-xs font-bold text-stone-400 uppercase tracking-wide">Solde</span>
-                    <span class="font-black text-xl ${month.endBalance < 0 ? 'text-rose-500' : 'text-indigo-400'}">${formatEur(month.endBalance)}</span>
+                <div class="px-5 py-3 mt-auto bg-zinc-950 border-t border-zinc-800 flex justify-between items-center">
+                    <span class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">Clôture</span>
+                    <span class="font-bold text-base ${month.endBalance < 0 ? 'text-rose-500' : 'text-white'}">${formatEur(month.endBalance)}</span>
                 </div>
             </div>
         `;
@@ -387,25 +383,24 @@ function renderEditorLists() {
     container.innerHTML = '';
     
     financialData.months.forEach(month => {
-        let html = `<div class="bg-stone-800 p-4 rounded-xl border border-stone-700 mb-3"><h4 class="font-bold text-white mb-3 border-b border-stone-600 pb-1">${month.name} ${month.year}</h4><div class="grid grid-cols-1 gap-4">`;
-        html += `<div><h5 class="text-xs font-bold text-emerald-400 mb-2">Entrées</h5><ul class="text-sm space-y-2">`;
+        let html = `<div class="bg-zinc-950 p-3 rounded-md border border-zinc-800 mb-2"><h4 class="font-semibold text-zinc-300 text-xs mb-2 border-b border-zinc-800 pb-1">${month.name} ${month.year}</h4><div class="grid grid-cols-1 gap-2">`;
+        html += `<div><ul class="text-[11px] space-y-1">`;
+        
         month.incomes.details.forEach((item, index) => {
-            html += `<li class="flex justify-between items-center bg-stone-900 p-2 rounded border border-stone-700">
-                        <span class="truncate text-stone-300 text-xs flex-grow">${item.label} (${item.amount}€)</span>
-                        <div class="flex gap-2">
-                            <button onclick="window.editTransaction('${month.id}', 'incomes', ${index})" class="text-indigo-400 hover:text-indigo-300 focus:outline-none">✏️</button>
-                            <button onclick="window.deleteTransaction('${month.id}', 'incomes', ${index})" class="text-rose-500 hover:text-rose-400 font-bold focus:outline-none">&times;</button>
+            html += `<li class="flex justify-between items-center bg-zinc-900 p-1.5 rounded border border-zinc-800">
+                        <span class="truncate text-zinc-400 flex-grow"><span class="text-emerald-500 mr-1">+</span>${item.label} (${item.amount}€)</span>
+                        <div class="flex gap-1 ml-2">
+                            <button onclick="window.editTransaction('${month.id}', 'incomes', ${index})" class="text-zinc-500 hover:text-indigo-400 transition-colors"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+                            <button onclick="window.deleteTransaction('${month.id}', 'incomes', ${index})" class="text-zinc-500 hover:text-rose-500 transition-colors"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
                         </div>
                      </li>`;
         });
-        html += `</ul></div>`;
-        html += `<div><h5 class="text-xs font-bold text-rose-400 mb-2">Sorties</h5><ul class="text-sm space-y-2">`;
         month.expenses.details.forEach((item, index) => {
-            html += `<li class="flex justify-between items-center bg-stone-900 p-2 rounded border border-stone-700">
-                        <span class="truncate text-stone-300 text-xs flex-grow">${item.label} (${item.amount}€)</span>
-                        <div class="flex gap-2">
-                            <button onclick="window.editTransaction('${month.id}', 'expenses', ${index})" class="text-indigo-400 hover:text-indigo-300 focus:outline-none">✏️</button>
-                            <button onclick="window.deleteTransaction('${month.id}', 'expenses', ${index})" class="text-rose-500 hover:text-rose-400 font-bold focus:outline-none">&times;</button>
+            html += `<li class="flex justify-between items-center bg-zinc-900 p-1.5 rounded border border-zinc-800">
+                        <span class="truncate text-zinc-400 flex-grow"><span class="text-rose-500 mr-1">-</span>${item.label} (${item.amount}€)</span>
+                        <div class="flex gap-1 ml-2">
+                            <button onclick="window.editTransaction('${month.id}', 'expenses', ${index})" class="text-zinc-500 hover:text-indigo-400 transition-colors"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+                            <button onclick="window.deleteTransaction('${month.id}', 'expenses', ${index})" class="text-zinc-500 hover:text-rose-500 transition-colors"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
                         </div>
                      </li>`;
         });
@@ -444,16 +439,19 @@ window.editTransaction = function(monthId, type, index) {
     document.getElementById('form-month').value = monthId;
     document.getElementById('form-type').value = type;
     window.updateCategoryOptions();
-    document.getElementById('form-category').value = item.category || 'Autre';
+    // Nettoie l'emoji de l'ancienne donnée si besoin pour le formulaire
+    document.getElementById('form-category').value = cleanCategory(item.category);
     document.getElementById('form-label').value = item.label;
     document.getElementById('form-amount').value = item.amount;
     document.getElementById('form-day').value = item.day;
 
     editingTransaction = { monthId, type, index };
     
-    document.getElementById('form-title').innerHTML = '<span class="icon-symbol text-amber-400">✏️</span> Modifier le flux';
+    document.getElementById('form-title').innerHTML = '<i data-lucide="pencil" class="w-5 h-5 text-amber-500"></i> Éditer la transaction';
+    if(window.lucide) window.lucide.createIcons();
+    
     const submitBtn = document.getElementById('submit-btn');
-    submitBtn.textContent = "Mettre à jour l'opération";
+    submitBtn.textContent = "Mettre à jour";
     submitBtn.classList.replace('bg-indigo-600', 'bg-amber-600');
     submitBtn.classList.replace('hover:bg-indigo-500', 'hover:bg-amber-500');
     
@@ -464,9 +462,11 @@ window.editTransaction = function(monthId, type, index) {
 window.cancelEdit = function() {
     editingTransaction = null;
     document.getElementById('transaction-form').reset();
-    document.getElementById('form-title').innerHTML = '<span class="icon-symbol text-indigo-400">⚡</span> Ajouter un flux';
+    document.getElementById('form-title').innerHTML = '<i data-lucide="plus-circle" class="w-5 h-5 text-indigo-500"></i> Saisir une transaction';
+    if(window.lucide) window.lucide.createIcons();
+
     const submitBtn = document.getElementById('submit-btn');
-    submitBtn.textContent = "Valider l'opération";
+    submitBtn.textContent = "Enregistrer";
     submitBtn.classList.replace('bg-amber-600', 'bg-indigo-600');
     submitBtn.classList.replace('hover:bg-amber-500', 'hover:bg-indigo-500');
     document.getElementById('recurring-container').classList.remove('hidden');
@@ -562,14 +562,14 @@ window.deleteTransaction = function(monthId, type, index) {
 };
 
 window.resetData = function() {
-    if(confirm("Effacer toutes vos modifications ?")) {
+    if(confirm("Attention : Rétablir la base de données effacera vos données. Continuer ?")) {
         financialData = JSON.parse(JSON.stringify(defaultData));
         saveDataToCloud().then(() => { location.reload(); });
     }
 };
 
 window.exportPDF = function() {
-    showSaveStatus('Génération du PDF...', 'text-emerald-400 border-emerald-800 bg-emerald-900/50');
+    showSaveStatus('Export en cours...', 'text-emerald-400');
     
     const filteredMonths = getFilteredMonths();
     if(filteredMonths.length === 0) return;
@@ -580,18 +580,18 @@ window.exportPDF = function() {
         <div style="padding: 20px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1f2937; background: white;">
             
             <div style="border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-bottom: 20px;">
-                <h1 style="color: #4f46e5; font-size: 24px; margin: 0;">📊 Bilan de Trésorerie - Flux</h1>
+                <h1 style="color: #4f46e5; font-size: 24px; margin: 0;">Rapport Financier - Flux</h1>
                 <p style="font-size: 14px; color: #6b7280; margin-top: 5px;">
-                    Période : ${startMonth.name} ${startMonth.year} à ${endMonth.name} ${endMonth.year}<br>
+                    Exercice : ${startMonth.name} ${startMonth.year} à ${endMonth.name} ${endMonth.year}<br>
                     Édité le : ${new Date().toLocaleDateString('fr-FR')}
                 </p>
             </div>
 
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px;">
                 <tr style="page-break-inside: avoid;">
-                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f9fafb; text-align: left;">Total Entrées</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f9fafb; text-align: left;">Total Sorties</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f3f4f6; text-align: left; color: #4f46e5;">Solde fin de période</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f9fafb; text-align: left;">Total Encaissements</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f9fafb; text-align: left;">Total Décaissements</th>
+                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f3f4f6; text-align: left; color: #4f46e5;">Variation Nette</th>
                 </tr>
                 <tr style="page-break-inside: avoid;">
                     <td style="border: 1px solid #e5e7eb; padding: 10px; color: #10b981; font-weight: bold;">${formatEur(financialData.summary.totalIncomes)}</td>
@@ -603,7 +603,8 @@ window.exportPDF = function() {
 
     filteredMonths.forEach(month => {
         htmlContent += `
-            <div style="page-break-inside: avoid;"> <h2 style="font-size: 18px; color: #111827; margin-top: 20px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e5e7eb;">
+            <div style="page-break-inside: avoid;">
+                <h2 style="font-size: 16px; color: #111827; margin-top: 20px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e5e7eb;">
                     ${month.name} ${month.year}
                 </h2>
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 5px;">
@@ -612,7 +613,7 @@ window.exportPDF = function() {
                             <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 10%;">Date</th>
                             <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 15%;">Type</th>
                             <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 25%;">Catégorie</th>
-                            <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 35%;">Libellé</th>
+                            <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 35%;">Description</th>
                             <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: right; width: 15%;">Montant</th>
                         </tr>
                     </thead>
@@ -620,21 +621,20 @@ window.exportPDF = function() {
         `;
 
         let allTransactions = [];
-        month.incomes.details.forEach(item => allTransactions.push({...item, txType: 'Entrée'}));
-        month.expenses.details.forEach(item => allTransactions.push({...item, txType: 'Sortie'}));
+        month.incomes.details.forEach(item => allTransactions.push({...item, txType: 'Encaissement'}));
+        month.expenses.details.forEach(item => allTransactions.push({...item, txType: 'Décaissement'}));
         allTransactions.sort((a, b) => a.day - b.day);
 
         if (allTransactions.length === 0) {
-            htmlContent += `<tr style="page-break-inside: avoid;"><td colspan="5" style="border: 1px solid #e5e7eb; padding: 8px; text-align: center; color: #9ca3af; font-style: italic;">Aucun flux enregistré ce mois-ci</td></tr>`;
+            htmlContent += `<tr style="page-break-inside: avoid;"><td colspan="5" style="border: 1px solid #e5e7eb; padding: 8px; text-align: center; color: #9ca3af; font-style: italic;">Aucune transaction comptabilisée</td></tr>`;
         } else {
             allTransactions.forEach(tx => {
-                const color = tx.txType === 'Entrée' ? '#10b981' : '#ef4444';
-                // L'attribut magique est ici : page-break-inside: avoid;
+                const color = tx.txType === 'Encaissement' ? '#10b981' : '#ef4444';
                 htmlContent += `
                     <tr style="page-break-inside: avoid;">
                         <td style="border: 1px solid #e5e7eb; padding: 8px; text-align: center;">${tx.day < 10 ? '0'+tx.day : tx.day}</td>
                         <td style="border: 1px solid #e5e7eb; padding: 8px; color: ${color}; font-weight: bold;">${tx.txType}</td>
-                        <td style="border: 1px solid #e5e7eb; padding: 8px; color: #6b7280;">${tx.category || 'Autre'}</td>
+                        <td style="border: 1px solid #e5e7eb; padding: 8px; color: #6b7280;">${cleanCategory(tx.category)}</td>
                         <td style="border: 1px solid #e5e7eb; padding: 8px;">${tx.label}</td>
                         <td style="border: 1px solid #e5e7eb; padding: 8px; text-align: right; font-weight: bold;">${formatEur(tx.amount)}</td>
                     </tr>
@@ -646,7 +646,7 @@ window.exportPDF = function() {
                     </tbody>
                 </table>
                 <div style="text-align: right; font-size: 14px; margin-bottom: 30px; page-break-inside: avoid;">
-                    <strong>Solde fin ${month.name} : <span style="color: ${month.endBalance < 0 ? '#ef4444' : '#4f46e5'}">${formatEur(month.endBalance)}</span></strong>
+                    <strong>Clôture ${month.name} : <span style="color: ${month.endBalance < 0 ? '#ef4444' : '#4f46e5'}">${formatEur(month.endBalance)}</span></strong>
                 </div>
             </div>
         `;
@@ -659,15 +659,19 @@ window.exportPDF = function() {
 
     const opt = {
       margin:       10,
-      filename:     `Flux_Tresorerie_${new Date().toISOString().slice(0,10)}.pdf`,
+      filename:     `Flux_Rapport_${new Date().toISOString().slice(0,10)}.pdf`,
       image:        { type: 'jpeg', quality: 0.98 },
-      // On active le mode css pour respecter les page-break-inside
       pagebreak:    { mode: ['css', 'avoid-all'] }, 
       html2canvas:  { scale: 2 },
       jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
 
     html2pdf().set(opt).from(printDiv).save().then(() => {
-        showSaveStatus('PDF Téléchargé !', 'text-indigo-400 border-indigo-800 bg-indigo-900/50');
+        showSaveStatus('Terminé', 'text-indigo-400');
     });
+};
+
+window.logout = async function() {
+    await signOut(auth);
+    window.location.href = "index.html";
 };
