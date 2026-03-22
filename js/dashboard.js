@@ -1,681 +1,688 @@
 // js/dashboard.js
-import { auth, db } from './firebase-config.js';
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { supabase } from './supabase-config.js';
 
-let myDocRef = null;
-let initialBalance = 0; 
+// ─── État global ────────────────────────────────────────────────────────────
+let financialData = null;
 let myChartInstance = null;
 let categoryChartInstance = null;
-let financialData = null; 
-let editingTransaction = null; 
+let editingTransaction = null;
 
-const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+                    'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
-// NOUVEAU : Catégories sobres sans emojis
 const categoriesDef = {
     expenses: ['Alimentation', 'Logement', 'Transport', 'Scolarité', 'Loisirs', 'Abonnements', 'Frais bancaires', 'Autre'],
-    incomes: ['Salaire', 'Bourse / Aides', 'Remboursement', 'Cadeau', 'Autre']
+    incomes:  ['Salaire', 'Bourse / Aides', 'Remboursement', 'Cadeau', 'Freelance', 'Autre']
 };
 
-// NOUVEAU : Fonction qui génère un compte vide sur le mois en cours
-const generateDefaultData = () => {
-    const d = new Date();
-    const currentMonth = monthNames[d.getMonth()];
-    const currentYear = d.getFullYear();
-    // Enlève les accents pour l'ID (ex: "février" devient "fevrier")
-    const currentId = `${currentMonth.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}-${currentYear}`;
-
-    return {
-        summary: { totalIncomes: 0, totalExpenses: 0, finalBalance: 0, savingsGoal: 1000, goalName: 'Mon premier objectif', goalActive: false },
-        months: [
-            {
-                id: currentId, name: currentMonth, year: currentYear, status: 'standard',
-                incomes: { total: 0, details: [] }, 
-                expenses: { total: 0, details: [] },
-                endBalance: 0, note: "Bienvenue sur Flux ! Saisissez votre première transaction."
-            }
-        ]
-    };
-};
-
-const formatEur = (num) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(num);
-
-// NOUVEAU : Fonction utilitaire pour nettoyer les anciens emojis de ta base de données à l'affichage
-const cleanCategory = (cat) => cat ? cat.replace(/[\u1000-\uFFFF]+/g, '').trim() : 'Autre';
-
-function showSaveStatus(message, classes) {
-    const statusBadge = document.getElementById('save-status');
-    if(!statusBadge) return;
-    statusBadge.textContent = message;
-    statusBadge.className = `text-[10px] px-2 py-0.5 rounded border border-zinc-800 ml-3 transition-opacity duration-300 ${classes}`;
-    statusBadge.style.display = 'inline-block';
-    statusBadge.style.opacity = 1;
-    setTimeout(() => { statusBadge.style.opacity = 0; }, 3000);
-}
-
-onAuthStateChanged(auth, (user) => {
-    if (user) {
-        myDocRef = doc(db, 'utilisateurs', user.uid);
-        loadDataFromCloud();
+// ─── Auth guard ──────────────────────────────────────────────────────────────
+supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!session) {
+        window.location.href = 'index.html';
     } else {
-        window.location.href = "index.html";
+        loadData(session.user.id);
     }
 });
 
-async function loadDataFromCloud() {
-    if (!myDocRef) return;
+supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT') window.location.href = 'index.html';
+});
+
+// ─── Données par défaut ──────────────────────────────────────────────────────
+function generateDefaultData() {
+    const d = new Date();
+    const currentMonth = monthNames[d.getMonth()];
+    const currentYear  = d.getFullYear();
+    const currentId    = slugifyMonth(currentMonth, currentYear);
+    return {
+        summary: {
+            totalIncomes: 0, totalExpenses: 0, finalBalance: 0,
+            savingsGoal: 1000, goalName: 'Mon premier objectif', goalActive: false
+        },
+        months: [{
+            id: currentId, name: currentMonth, year: currentYear, status: 'standard',
+            incomes:  { total: 0, details: [] },
+            expenses: { total: 0, details: [] },
+            endBalance: 0,
+            note: 'Bienvenue sur Flux ! Saisissez votre première transaction.'
+        }]
+    };
+}
+
+// Normalisation robuste : "Août 2026" → "aout-2026"
+function slugifyMonth(name, year) {
+    return name.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, '-') + '-' + year;
+}
+
+// ─── Utilitaires ─────────────────────────────────────────────────────────────
+const formatEur = (n) => new Intl.NumberFormat('fr-FR', {
+    style: 'currency', currency: 'EUR',
+    minimumFractionDigits: 0, maximumFractionDigits: 2
+}).format(n);
+
+// Sanitize pour éviter XSS lors des injections HTML
+function sanitize(str) {
+    const d = document.createElement('div');
+    d.textContent = str ?? '';
+    return d.innerHTML;
+}
+
+function showSaveStatus(message, classes) {
+    const el = document.getElementById('save-status');
+    if (!el) return;
+    el.textContent = message;
+    el.className = `text-[10px] px-2 py-0.5 rounded border border-zinc-800 ml-3 font-medium transition-opacity duration-300 ${classes}`;
+    el.style.display = 'inline-block';
+    el.style.opacity = '1';
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
+}
+
+// ─── Firestore → Supabase : lecture / écriture ───────────────────────────────
+let currentUserId = null;
+
+async function loadData(userId) {
+    currentUserId = userId;
     showSaveStatus('Synchronisation...', 'text-zinc-400');
-    try {
-        const docSnap = await getDoc(myDocRef);
-        if (docSnap.exists()) {
-            financialData = docSnap.data();
-            if(financialData.summary.savingsGoal === undefined) financialData.summary.savingsGoal = 1000;
-            if(financialData.summary.goalName === undefined) financialData.summary.goalName = 'Objectif';
-            if(financialData.summary.goalActive === undefined) financialData.summary.goalActive = false;
-            showSaveStatus('À jour', 'text-indigo-400');
-        } else {
-            // NOUVEAU : On appelle la fonction pour générer un compte vierge au mois actuel !
-            financialData = generateDefaultData();
-            await saveDataToCloud(); 
-        }
-        window.updateCategoryOptions(); 
-        initFilters(); 
-        updateApp(true); 
-    } catch (error) {
-        console.error("Erreur Firestore :", error);
+
+    const { data, error } = await supabase
+        .from('user_data')
+        .select('data')
+        .eq('user_id', userId)
+        .single();
+
+    if (error && error.code !== 'PGRST116') {
+        // PGRST116 = no rows (premier login)
+        console.error('Erreur chargement :', error);
+        showSaveStatus('Erreur de chargement', 'text-rose-400');
+        return;
     }
+
+    if (data) {
+        financialData = data.data;
+        // Migrations de champs manquants
+        financialData.summary.savingsGoal  ??= 1000;
+        financialData.summary.goalName     ??= 'Objectif';
+        financialData.summary.goalActive   ??= false;
+        showSaveStatus('À jour', 'text-indigo-400');
+    } else {
+        financialData = generateDefaultData();
+        await saveData();
+    }
+
+    window.updateCategoryOptions();
+    initFilters();
+    updateApp(true);
 }
 
-async function saveDataToCloud() {
-    if (!myDocRef || !financialData) return;
+async function saveData() {
+    if (!currentUserId || !financialData) return;
     showSaveStatus('Sauvegarde...', 'text-amber-400');
-    try {
-        await setDoc(myDocRef, financialData);
+
+    const { error } = await supabase
+        .from('user_data')
+        .upsert({ user_id: currentUserId, data: financialData }, { onConflict: 'user_id' });
+
+    if (error) {
+        console.error('Erreur sauvegarde :', error);
+        showSaveStatus('Erreur de sauvegarde', 'text-rose-400');
+    } else {
         showSaveStatus('Sauvegardé', 'text-emerald-400');
-    } catch (error) {
-        console.error("Erreur :", error);
     }
 }
 
+// ─── Filtres ─────────────────────────────────────────────────────────────────
 function initFilters() {
-    const startSelect = document.getElementById('filter-start');
-    const endSelect = document.getElementById('filter-end');
-    if(!startSelect || !financialData) return;
-    
-    startSelect.innerHTML = ''; endSelect.innerHTML = '';
-    
-    financialData.months.forEach((month, index) => {
-        const option1 = document.createElement('option');
-        const option2 = document.createElement('option');
-        option1.value = index; option1.textContent = `${month.name} ${month.year}`;
-        option1.className = "bg-zinc-950 text-zinc-200"; 
-        
-        option2.value = index; option2.textContent = `${month.name} ${month.year}`;
-        option2.className = "bg-zinc-950 text-zinc-200"; 
-        
-        startSelect.appendChild(option1);
-        endSelect.appendChild(option2);
+    const s = document.getElementById('filter-start');
+    const e = document.getElementById('filter-end');
+    if (!s || !financialData) return;
+    s.innerHTML = ''; e.innerHTML = '';
+    financialData.months.forEach((month, i) => {
+        const label = `${month.name} ${month.year}`;
+        const o1 = new Option(label, i); o1.className = 'bg-zinc-950';
+        const o2 = new Option(label, i); o2.className = 'bg-zinc-950';
+        s.appendChild(o1); e.appendChild(o2);
     });
-    
-    startSelect.value = 0; 
-    endSelect.value = financialData.months.length - 1; 
+    s.value = 0;
+    e.value = financialData.months.length - 1;
 }
 
 function getFilteredMonths() {
-    let startIdx = parseInt(document.getElementById('filter-start').value);
-    let endIdx = parseInt(document.getElementById('filter-end').value);
-    
-    if(startIdx > endIdx) {
-        const temp = startIdx; startIdx = endIdx; endIdx = temp;
-        document.getElementById('filter-start').value = startIdx;
-        document.getElementById('filter-end').value = endIdx;
+    let start = parseInt(document.getElementById('filter-start').value);
+    let end   = parseInt(document.getElementById('filter-end').value);
+    if (start > end) {
+        [start, end] = [end, start];
+        document.getElementById('filter-start').value = start;
+        document.getElementById('filter-end').value   = end;
     }
-    
-    return financialData.months.slice(startIdx, endIdx + 1);
+    return financialData.months.slice(start, end + 1);
 }
 
+// ─── Recalcul ─────────────────────────────────────────────────────────────────
 function recalculateState() {
-    let runningBalance = initialBalance;
-    if(!financialData || !financialData.months) return;
-
+    if (!financialData?.months) return;
+    let running = 0;
     financialData.months.forEach(month => {
         month.incomes.details.sort((a, b) => a.day - b.day);
         month.expenses.details.sort((a, b) => a.day - b.day);
-        month.incomes.total = month.incomes.details.reduce((sum, item) => sum + item.amount, 0);
-        month.expenses.total = month.expenses.details.reduce((sum, item) => sum + item.amount, 0);
-        runningBalance += (month.incomes.total - month.expenses.total);
-        month.endBalance = runningBalance;
+        month.incomes.total  = month.incomes.details.reduce((s, i) => s + i.amount, 0);
+        month.expenses.total = month.expenses.details.reduce((s, i) => s + i.amount, 0);
+        running += month.incomes.total - month.expenses.total;
+        month.endBalance = running;
     });
-    financialData.summary.finalBalance = runningBalance;
+    financialData.summary.finalBalance = running;
 
-    let filteredInc = 0; let filteredExp = 0;
-    const filteredMonths = getFilteredMonths();
-    filteredMonths.forEach(month => {
-        filteredInc += month.incomes.total;
-        filteredExp += month.expenses.total;
-    });
-    financialData.summary.totalIncomes = filteredInc;
-    financialData.summary.totalExpenses = filteredExp;
-    
-    if (filteredMonths.length > 0) {
-        financialData.summary.filteredBalance = filteredMonths[filteredMonths.length - 1].endBalance;
-    } else {
-        financialData.summary.filteredBalance = 0;
-    }
+    const filtered = getFilteredMonths();
+    financialData.summary.totalIncomes  = filtered.reduce((s, m) => s + m.incomes.total, 0);
+    financialData.summary.totalExpenses = filtered.reduce((s, m) => s + m.expenses.total, 0);
+    financialData.summary.filteredBalance = filtered.length
+        ? filtered[filtered.length - 1].endBalance : 0;
 }
 
-window.updateGoal = function() {
-    const isActive = document.getElementById('goal-active').checked;
-    const name = document.getElementById('goal-name').value || 'Objectif';
-    const amount = parseFloat(document.getElementById('goal-input').value) || 0;
-    
-    financialData.summary.goalActive = isActive;
-    financialData.summary.goalName = name;
-    financialData.summary.savingsGoal = amount;
-    
-    saveDataToCloud();
+// ─── Objectif ─────────────────────────────────────────────────────────────────
+window.updateGoal = function () {
+    financialData.summary.goalActive = document.getElementById('goal-active').checked;
+    financialData.summary.goalName   = document.getElementById('goal-name').value || 'Objectif';
+    financialData.summary.savingsGoal = parseFloat(document.getElementById('goal-input').value) || 0;
+    saveData();
     renderGoal();
 };
 
 function renderGoal() {
-    const goalActive = document.getElementById('goal-active');
-    const goalName = document.getElementById('goal-name');
-    const goalInput = document.getElementById('goal-input');
-    const goalBarContainer = document.getElementById('goal-bar-container');
-    const goalBar = document.getElementById('goal-bar');
-    const goalPercent = document.getElementById('goal-percent');
-    
-    if(!goalInput || !financialData) return;
-    
-    goalActive.checked = financialData.summary.goalActive;
-    goalName.value = financialData.summary.goalName;
-    goalInput.value = financialData.summary.savingsGoal;
-    
-    if (financialData.summary.goalActive) {
-        goalBarContainer.classList.remove('hidden');
-        goalPercent.classList.remove('hidden');
-        
-        const currentBalance = financialData.summary.finalBalance;
-        let percent = 0;
-        
-        if(financialData.summary.savingsGoal > 0 && currentBalance > 0) {
-            percent = Math.min((currentBalance / financialData.summary.savingsGoal) * 100, 100);
-        }
-        
-        goalPercent.textContent = `${Math.round(percent)}%`;
-        goalBar.style.width = `${percent}%`;
-        
-        if(percent >= 100) {
-            goalBar.classList.replace('bg-indigo-600', 'bg-emerald-500');
-            goalPercent.classList.replace('text-indigo-400', 'text-emerald-500');
-        } else {
-            goalBar.classList.replace('bg-emerald-500', 'bg-indigo-600');
-            goalPercent.classList.replace('text-emerald-500', 'text-indigo-400');
-        }
+    const isActive   = financialData.summary.goalActive;
+    const bar        = document.getElementById('goal-bar');
+    const barWrap    = document.getElementById('goal-bar-container');
+    const pct        = document.getElementById('goal-percent');
+    const nameInput  = document.getElementById('goal-name');
+    const amtInput   = document.getElementById('goal-input');
+    const activeChk  = document.getElementById('goal-active');
+    if (!bar || !financialData) return;
+
+    activeChk.checked  = isActive;
+    nameInput.value    = financialData.summary.goalName;
+    amtInput.value     = financialData.summary.savingsGoal;
+
+    if (isActive) {
+        barWrap.classList.remove('hidden');
+        pct.classList.remove('hidden');
+        const goal    = financialData.summary.savingsGoal;
+        const balance = financialData.summary.finalBalance;
+        const percent = goal > 0 && balance > 0
+            ? Math.min((balance / goal) * 100, 100) : 0;
+        pct.textContent  = `${Math.round(percent)}%`;
+        bar.style.width  = `${percent}%`;
+        const done = percent >= 100;
+        bar.className    = `h-1.5 rounded-full transition-all duration-500 ${done ? 'bg-emerald-500' : 'bg-indigo-600'}`;
+        pct.className    = `text-xs font-bold ml-auto ${done ? 'text-emerald-500' : 'text-indigo-400'}`;
     } else {
-        goalBarContainer.classList.add('hidden');
-        goalPercent.classList.add('hidden');
+        barWrap.classList.add('hidden');
+        pct.classList.add('hidden');
     }
 }
 
+// ─── Sélecteur de mois du formulaire ─────────────────────────────────────────
 function updateMonthSelectOptions() {
-    const select = document.getElementById('form-month');
-    if(!select || !financialData) return;
-    const previousValue = select.value;
-    select.innerHTML = '';
-    financialData.months.forEach(month => {
-        const option = document.createElement('option');
-        option.value = month.id; option.textContent = `${month.name} ${month.year}`;
-        select.appendChild(option);
+    const sel = document.getElementById('form-month');
+    if (!sel || !financialData) return;
+    const prev = sel.value;
+    sel.innerHTML = '';
+    financialData.months.forEach(m => {
+        sel.appendChild(new Option(`${m.name} ${m.year}`, m.id));
     });
-    if(previousValue) select.value = previousValue;
+    if (prev) sel.value = prev;
 }
 
-window.updateApp = function(skipSave = false) {
-    recalculateState(); 
-    updateMonthSelectOptions(); 
-    populateKPIs(); 
-    renderChart(); 
-    renderCategoryChart(); 
-    buildMonthlyCards(); 
+// ─── App update (point d'entrée principal) ────────────────────────────────────
+window.updateApp = function (skipSave = false) {
+    recalculateState();
+    updateMonthSelectOptions();
+    populateKPIs();
+    renderChart();
+    renderCategoryChart();
+    buildMonthlyCards();
     renderEditorLists();
     renderGoal();
-    if(window.lucide) window.lucide.createIcons(); // Rendu des icônes SVG
-    if(!skipSave) { saveDataToCloud(); } 
-}
+    if (window.lucide) window.lucide.createIcons();
+    if (!skipSave) saveData();
+};
 
+// ─── KPIs ─────────────────────────────────────────────────────────────────────
 function populateKPIs() {
-    if(!financialData) return;
-    if(document.getElementById('kpi-incomes')) document.getElementById('kpi-incomes').textContent = formatEur(financialData.summary.totalIncomes);
-    if(document.getElementById('kpi-expenses')) document.getElementById('kpi-expenses').textContent = formatEur(financialData.summary.totalExpenses);
-    if(document.getElementById('kpi-balance')) document.getElementById('kpi-balance').textContent = formatEur(financialData.summary.filteredBalance);
+    if (!financialData) return;
+    document.getElementById('kpi-incomes').textContent  = formatEur(financialData.summary.totalIncomes);
+    document.getElementById('kpi-expenses').textContent = formatEur(financialData.summary.totalExpenses);
+    document.getElementById('kpi-balance').textContent  = formatEur(financialData.summary.filteredBalance);
 }
 
+// ─── Graphiques ───────────────────────────────────────────────────────────────
 function renderChart() {
-    const ctxElement = document.getElementById('financeChart');
-    if(!ctxElement || !financialData) return;
-    const ctx = ctxElement.getContext('2d');
+    const el = document.getElementById('financeChart');
+    if (!el || !financialData) return;
     if (myChartInstance) myChartInstance.destroy();
-    
-    const filteredMonths = getFilteredMonths();
-    const labels = filteredMonths.map(m => `${m.name.substring(0,3)} ${m.year.toString().slice(-2)}`);
-    const incomeData = filteredMonths.map(m => m.incomes.total);
-    const expenseData = filteredMonths.map(m => m.expenses.total);
-    const balanceData = filteredMonths.map(m => m.endBalance);
-
-    // Ajustement des couleurs pour le thème Zinc Pro
-    myChartInstance = new Chart(ctx, {
+    const months = getFilteredMonths();
+    myChartInstance = new Chart(el.getContext('2d'), {
         type: 'bar',
         data: {
-            labels: labels,
+            labels: months.map(m => `${m.name.substring(0,3)} ${m.year.toString().slice(-2)}`),
             datasets: [
-                { type: 'line', label: 'Solde Fin', data: balanceData, borderColor: '#6366f1', backgroundColor: '#6366f1', borderWidth: 2, pointRadius: 4, fill: false, tension: 0.3 },
-                { type: 'bar', label: 'Entrées', data: incomeData, backgroundColor: 'rgba(16, 185, 129, 0.8)', borderColor: '#10b981', borderWidth: 1, borderRadius: 2 },
-                { type: 'bar', label: 'Sorties', data: expenseData, backgroundColor: 'rgba(244, 63, 94, 0.8)', borderColor: '#f43f5e', borderWidth: 1, borderRadius: 2 }
+                { type: 'line', label: 'Solde', data: months.map(m => m.endBalance),
+                  borderColor: '#6366f1', backgroundColor: '#6366f1',
+                  borderWidth: 2, pointRadius: 4, fill: false, tension: 0.3 },
+                { type: 'bar', label: 'Entrées', data: months.map(m => m.incomes.total),
+                  backgroundColor: 'rgba(16,185,129,0.8)', borderColor: '#10b981',
+                  borderWidth: 1, borderRadius: 2 },
+                { type: 'bar', label: 'Sorties', data: months.map(m => m.expenses.total),
+                  backgroundColor: 'rgba(244,63,94,0.8)', borderColor: '#f43f5e',
+                  borderWidth: 1, borderRadius: 2 }
             ]
         },
         options: {
-            responsive: true, maintainAspectRatio: false, color: '#a1a1aa', interaction: { mode: 'index', intersect: false },
-            plugins: { tooltip: { backgroundColor: 'rgba(24, 24, 27, 0.95)', titleColor: '#fff', bodyColor: '#d4d4d8', callbacks: { label: (c) => (c.dataset.label ? c.dataset.label + ': ' : '') + formatEur(c.parsed.y) } }, legend: {labels:{color: '#a1a1aa'}} },
-            scales: { x: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa' } }, y: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa', callback: function(value) { return value + ' €'; } } } }
+            responsive: true, maintainAspectRatio: false, color: '#a1a1aa',
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                tooltip: { backgroundColor: 'rgba(24,24,27,0.95)', titleColor: '#fff',
+                    bodyColor: '#d4d4d8',
+                    callbacks: { label: c => (c.dataset.label ?? '') + ': ' + formatEur(c.parsed.y) } },
+                legend: { labels: { color: '#a1a1aa' } }
+            },
+            scales: {
+                x: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa' } },
+                y: { grid: { color: '#27272a' }, ticks: { color: '#a1a1aa',
+                    callback: v => v + ' €' } }
+            }
         }
     });
 }
 
 function renderCategoryChart() {
-    const ctxElement = document.getElementById('categoryChart');
-    if(!ctxElement || !financialData) return;
-    const ctx = ctxElement.getContext('2d');
+    const el = document.getElementById('categoryChart');
+    if (!el || !financialData) return;
     if (categoryChartInstance) categoryChartInstance.destroy();
-
-    let categoryTotals = {};
-    const filteredMonths = getFilteredMonths(); 
-    
-    filteredMonths.forEach(month => {
-        month.expenses.details.forEach(exp => {
-            const cat = cleanCategory(exp.category);
-            if(!categoryTotals[cat]) categoryTotals[cat] = 0;
-            categoryTotals[cat] += exp.amount;
-        });
-    });
-
-    const sortedCategories = Object.keys(categoryTotals).sort((a, b) => categoryTotals[b] - categoryTotals[a]);
-    const data = sortedCategories.map(cat => categoryTotals[cat]);
-    const labels = sortedCategories;
-    // Couleurs plus sobres
-    const colors = ['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#3b82f6', '#0ea5e9'];
-
-    categoryChartInstance = new Chart(ctx, {
+    const totals = {};
+    getFilteredMonths().forEach(m =>
+        m.expenses.details.forEach(e => {
+            totals[e.category] = (totals[e.category] ?? 0) + e.amount;
+        })
+    );
+    const cats   = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+    const colors = ['#6366f1','#8b5cf6','#a855f7','#d946ef','#ec4899','#f43f5e','#3b82f6','#0ea5e9'];
+    categoryChartInstance = new Chart(el.getContext('2d'), {
         type: 'doughnut',
-        data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
+        data: { labels: cats, datasets: [{ data: cats.map(c => totals[c]),
+            backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
         options: {
             responsive: true, maintainAspectRatio: false, cutout: '75%',
-            plugins: { 
-                legend: { position: 'right', labels: { color: '#a1a1aa', font: {size: 10}, boxWidth: 10 } },
-                tooltip: { callbacks: { label: (c) => ' ' + formatEur(c.parsed) } }
+            plugins: {
+                legend: { position: 'right', labels: { color: '#a1a1aa', font: { size: 10 }, boxWidth: 10 } },
+                tooltip: { callbacks: { label: c => ' ' + formatEur(c.parsed) } }
             }
         }
     });
 }
 
+// ─── Cartes mensuelles ────────────────────────────────────────────────────────
 function buildMonthlyCards() {
     const container = document.getElementById('monthly-container');
-    if(!container || !financialData) return;
-    container.innerHTML = ''; 
-    let currentDisplayedYear = 0;
-    
-    const filteredMonths = getFilteredMonths();
-
-    filteredMonths.forEach((month) => {
-        if (month.year !== currentDisplayedYear) {
-            container.insertAdjacentHTML('beforeend', `<div class="col-span-1 md:col-span-2 lg:col-span-3 mt-6 mb-2 flex items-center"><h2 class="text-xl font-bold text-zinc-500 mr-4 tracking-tight">${month.year}</h2><div class="h-px bg-zinc-800 flex-grow"></div></div>`);
-            currentDisplayedYear = month.year;
+    if (!container || !financialData) return;
+    container.innerHTML = '';
+    let lastYear = 0;
+    getFilteredMonths().forEach(month => {
+        if (month.year !== lastYear) {
+            container.insertAdjacentHTML('beforeend',
+                `<div class="col-span-1 md:col-span-2 lg:col-span-3 mt-4 mb-1 flex items-center gap-3">
+                    <h2 class="text-base font-bold text-zinc-500">${month.year}</h2>
+                    <div class="h-px bg-zinc-800 flex-grow"></div>
+                 </div>`);
+            lastYear = month.year;
         }
 
-        const cardHTML = `
-            <div class="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden flex flex-col h-full shadow-sm">
-                <button class="w-full text-left px-5 py-4 flex justify-between items-center focus:outline-none bg-zinc-900 hover:bg-zinc-800/50 transition-colors" onclick="window.toggleCard('${month.id}')">
-                    <div class="flex items-center"><i data-lucide="calendar" class="w-4 h-4 mr-3 text-zinc-400"></i><h3 class="font-semibold text-zinc-100">${month.name}</h3></div><i data-lucide="chevron-down" class="w-4 h-4 text-zinc-500 transform transition-transform duration-300" id="chevron-${month.id}"></i>
+        const incRows = month.incomes.details.length
+            ? month.incomes.details.map(item => `
+                <li class="flex justify-between items-start gap-2 text-zinc-300">
+                    <div class="min-w-0">
+                        <span class="font-medium text-xs block truncate">${sanitize(item.label)}</span>
+                        <span class="text-[10px] text-zinc-500 block">${sanitize(item.category)}</span>
+                    </div>
+                    <span class="font-medium text-emerald-400 whitespace-nowrap text-xs shrink-0">${formatEur(item.amount)}</span>
+                </li>`).join('')
+            : '<li class="text-zinc-600 text-[10px] italic">Aucun mouvement</li>';
+
+        const expRows = month.expenses.details.length
+            ? month.expenses.details.map(item => `
+                <li class="flex justify-between items-start gap-2 text-zinc-300">
+                    <div class="min-w-0">
+                        <span class="font-medium text-xs block truncate">${sanitize(item.label)}</span>
+                        <span class="text-[10px] text-zinc-500 block">${sanitize(item.category)}</span>
+                    </div>
+                    <span class="font-medium text-rose-400 whitespace-nowrap text-xs shrink-0">${formatEur(item.amount)}</span>
+                </li>`).join('')
+            : '<li class="text-zinc-600 text-[10px] italic">Aucun mouvement</li>';
+
+        container.insertAdjacentHTML('beforeend', `
+            <div class="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden flex flex-col shadow-sm">
+                <button class="w-full text-left px-4 py-3.5 flex justify-between items-center bg-zinc-900 hover:bg-zinc-800/50 transition-colors focus:outline-none"
+                        onclick="window.toggleCard('${month.id}')">
+                    <div class="flex items-center gap-2.5">
+                        <i data-lucide="calendar" class="w-4 h-4 text-zinc-500 shrink-0"></i>
+                        <h3 class="font-semibold text-zinc-100 text-sm">${sanitize(month.name)}</h3>
+                    </div>
+                    <i data-lucide="chevron-down" class="w-4 h-4 text-zinc-500 transition-transform duration-300" id="chevron-${month.id}"></i>
                 </button>
-                <div class="px-5 py-3 border-b border-t border-zinc-800 flex justify-between text-xs bg-zinc-950/50">
-                    <span class="text-emerald-500 font-semibold">+ ${formatEur(month.incomes.total)}</span><span class="text-rose-500 font-semibold">- ${formatEur(month.expenses.total)}</span>
+                <div class="px-4 py-2 border-y border-zinc-800 flex justify-between bg-zinc-950/50 text-xs">
+                    <span class="text-emerald-500 font-semibold">+ ${formatEur(month.incomes.total)}</span>
+                    <span class="text-rose-500 font-semibold">- ${formatEur(month.expenses.total)}</span>
                 </div>
-                <div id="content-${month.id}" class="month-card-content bg-zinc-900/30 flex-grow">
-                    <div class="p-5">
-                        <div class="mb-5">
-                            <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 border-b border-zinc-800 pb-1">Encaissements</h4>
-                            <ul class="text-xs space-y-2">
-                                ${month.incomes.details.length ? month.incomes.details.map(item => `
-                                    <li class="flex justify-between items-start text-zinc-300">
-                                        <div class="flex flex-col pr-2">
-                                            <span class="font-medium truncate block max-w-[150px]">${item.label}</span>
-                                            <span class="text-[9px] text-zinc-500 block">${cleanCategory(item.category)}</span>
-                                        </div>
-                                        <span class="font-medium text-emerald-400 whitespace-nowrap">${formatEur(item.amount)}</span>
-                                    </li>`).join('') : '<li class="text-zinc-600 text-[10px] italic">Aucun mouvement</li>'}
-                            </ul>
+                <div id="content-${month.id}" class="month-card-content">
+                    <div class="p-4 space-y-4">
+                        <div>
+                            <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 pb-1 border-b border-zinc-800">Encaissements</h4>
+                            <ul class="space-y-2">${incRows}</ul>
                         </div>
                         <div>
-                            <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 border-b border-zinc-800 pb-1">Décaissements</h4>
-                            <ul class="text-xs space-y-2">
-                                ${month.expenses.details.length ? month.expenses.details.map(item => `
-                                    <li class="flex justify-between items-start text-zinc-300">
-                                        <div class="flex flex-col pr-2">
-                                            <span class="font-medium truncate block max-w-[150px]">${item.label}</span>
-                                            <span class="text-[9px] text-zinc-500 block">${cleanCategory(item.category)}</span>
-                                        </div>
-                                        <span class="font-medium text-rose-400 whitespace-nowrap">${formatEur(item.amount)}</span>
-                                    </li>`).join('') : '<li class="text-zinc-600 text-[10px] italic">Aucun mouvement</li>'}
-                            </ul>
+                            <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 pb-1 border-b border-zinc-800">Décaissements</h4>
+                            <ul class="space-y-2">${expRows}</ul>
                         </div>
                     </div>
                 </div>
-                <div class="px-5 py-3 mt-auto bg-zinc-950 border-t border-zinc-800 flex justify-between items-center">
+                <div class="px-4 py-3 mt-auto bg-zinc-950 border-t border-zinc-800 flex justify-between items-center">
                     <span class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">Clôture</span>
-                    <span class="font-bold text-base ${month.endBalance < 0 ? 'text-rose-500' : 'text-white'}">${formatEur(month.endBalance)}</span>
+                    <span class="font-bold text-sm ${month.endBalance < 0 ? 'text-rose-500' : 'text-white'}">${formatEur(month.endBalance)}</span>
                 </div>
-            </div>
-        `;
-        container.insertAdjacentHTML('beforeend', cardHTML);
+            </div>`);
     });
 }
 
+// ─── Liste d'édition rapide ───────────────────────────────────────────────────
 function renderEditorLists() {
     const container = document.getElementById('editor-lists-container');
-    if(!container || !financialData) return;
+    if (!container || !financialData) return;
     container.innerHTML = '';
-    
+
+    if (financialData.months.every(m => !m.incomes.details.length && !m.expenses.details.length)) {
+        container.innerHTML = '<p class="text-zinc-600 text-xs italic text-center py-4">Aucune transaction saisie</p>';
+        return;
+    }
+
     financialData.months.forEach(month => {
-        let html = `<div class="bg-zinc-950 p-3 rounded-md border border-zinc-800 mb-2"><h4 class="font-semibold text-zinc-300 text-xs mb-2 border-b border-zinc-800 pb-1">${month.name} ${month.year}</h4><div class="grid grid-cols-1 gap-2">`;
-        html += `<div><ul class="text-[11px] space-y-1">`;
-        
-        month.incomes.details.forEach((item, index) => {
-            html += `<li class="flex justify-between items-center bg-zinc-900 p-1.5 rounded border border-zinc-800">
-                        <span class="truncate text-zinc-400 flex-grow"><span class="text-emerald-500 mr-1">+</span>${item.label} (${item.amount}€)</span>
-                        <div class="flex gap-1 ml-2">
-                            <button onclick="window.editTransaction('${month.id}', 'incomes', ${index})" class="text-zinc-500 hover:text-indigo-400 transition-colors"><i data-lucide="pencil" class="w-3 h-3"></i></button>
-                            <button onclick="window.deleteTransaction('${month.id}', 'incomes', ${index})" class="text-zinc-500 hover:text-rose-500 transition-colors"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
-                        </div>
-                     </li>`;
-        });
-        month.expenses.details.forEach((item, index) => {
-            html += `<li class="flex justify-between items-center bg-zinc-900 p-1.5 rounded border border-zinc-800">
-                        <span class="truncate text-zinc-400 flex-grow"><span class="text-rose-500 mr-1">-</span>${item.label} (${item.amount}€)</span>
-                        <div class="flex gap-1 ml-2">
-                            <button onclick="window.editTransaction('${month.id}', 'expenses', ${index})" class="text-zinc-500 hover:text-indigo-400 transition-colors"><i data-lucide="pencil" class="w-3 h-3"></i></button>
-                            <button onclick="window.deleteTransaction('${month.id}', 'expenses', ${index})" class="text-zinc-500 hover:text-rose-500 transition-colors"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
-                        </div>
-                     </li>`;
-        });
-        html += `</ul></div></div></div>`;
-        container.insertAdjacentHTML('beforeend', html);
+        const all = [
+            ...month.incomes.details.map((item, i) => ({ ...item, type: 'incomes', index: i })),
+            ...month.expenses.details.map((item, i) => ({ ...item, type: 'expenses', index: i }))
+        ];
+        if (!all.length) return;
+
+        let rows = all.map(item => `
+            <li class="flex items-center justify-between gap-2 py-1.5 border-b border-zinc-800/50 last:border-0">
+                <div class="min-w-0 flex-1">
+                    <span class="${item.type === 'incomes' ? 'text-emerald-500' : 'text-rose-500'} font-bold mr-1 text-xs">${item.type === 'incomes' ? '+' : '−'}</span>
+                    <span class="text-zinc-300 text-xs truncate">${sanitize(item.label)}</span>
+                    <span class="text-zinc-600 text-[10px] ml-1">${formatEur(item.amount)}</span>
+                </div>
+                <div class="flex gap-1 shrink-0">
+                    <button onclick="window.editTransaction('${month.id}','${item.type}',${item.index})"
+                            class="p-1 text-zinc-500 hover:text-indigo-400 transition-colors rounded hover:bg-zinc-800">
+                        <i data-lucide="pencil" class="w-3 h-3"></i>
+                    </button>
+                    <button onclick="window.deleteTransaction('${month.id}','${item.type}',${item.index})"
+                            class="p-1 text-zinc-500 hover:text-rose-500 transition-colors rounded hover:bg-zinc-800">
+                        <i data-lucide="trash-2" class="w-3 h-3"></i>
+                    </button>
+                </div>
+            </li>`).join('');
+
+        container.insertAdjacentHTML('beforeend', `
+            <div class="mb-3">
+                <h4 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-1.5">${sanitize(month.name)} ${month.year}</h4>
+                <ul>${rows}</ul>
+            </div>`);
     });
 }
 
-window.updateCategoryOptions = function() {
-    const typeSelect = document.getElementById('form-type');
-    const categorySelect = document.getElementById('form-category');
-    if(!typeSelect || !categorySelect) return;
-    categorySelect.innerHTML = '';
-    const currentCategories = categoriesDef[typeSelect.value];
-    currentCategories.forEach(cat => {
-        const option = document.createElement('option');
-        option.value = cat; option.textContent = cat;
-        categorySelect.appendChild(option);
-    });
+// ─── Interactions ─────────────────────────────────────────────────────────────
+window.updateCategoryOptions = function () {
+    const type = document.getElementById('form-type');
+    const cat  = document.getElementById('form-category');
+    if (!type || !cat) return;
+    cat.innerHTML = '';
+    categoriesDef[type.value].forEach(c => cat.appendChild(new Option(c, c)));
 };
 
-window.toggleCard = function(id) {
+window.toggleCard = function (id) {
     const content = document.getElementById(`content-${id}`);
     const chevron = document.getElementById(`chevron-${id}`);
-    if(!content || !chevron) return;
-    const isExpanded = content.classList.contains('active');
-    if (isExpanded) { content.classList.remove('active'); chevron.style.transform = 'rotate(0deg)'; } 
-    else { content.classList.add('active'); chevron.style.transform = 'rotate(180deg)'; }
+    if (!content) return;
+    const isOpen = content.classList.contains('active');
+    content.classList.toggle('active', !isOpen);
+    if (chevron) chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
 };
 
-window.editTransaction = function(monthId, type, index) {
+window.editTransaction = function (monthId, type, index) {
     const month = financialData.months.find(m => m.id === monthId);
-    if(!month) return;
+    if (!month) return;
     const item = month[type].details[index];
 
-    document.getElementById('form-month').value = monthId;
-    document.getElementById('form-type').value = type;
+    document.getElementById('form-month').value    = monthId;
+    document.getElementById('form-type').value     = type;
     window.updateCategoryOptions();
-    // Nettoie l'emoji de l'ancienne donnée si besoin pour le formulaire
-    document.getElementById('form-category').value = cleanCategory(item.category);
-    document.getElementById('form-label').value = item.label;
-    document.getElementById('form-amount').value = item.amount;
-    document.getElementById('form-day').value = item.day;
+    document.getElementById('form-category').value = item.category;
+    document.getElementById('form-label').value    = item.label;
+    document.getElementById('form-amount').value   = item.amount;
+    document.getElementById('form-day').value      = item.day;
 
     editingTransaction = { monthId, type, index };
-    
-    document.getElementById('form-title').innerHTML = '<i data-lucide="pencil" class="w-5 h-5 text-amber-500"></i> Éditer la transaction';
-    if(window.lucide) window.lucide.createIcons();
-    
-    const submitBtn = document.getElementById('submit-btn');
-    submitBtn.textContent = "Mettre à jour";
-    submitBtn.classList.replace('bg-indigo-600', 'bg-amber-600');
-    submitBtn.classList.replace('hover:bg-indigo-500', 'hover:bg-amber-500');
-    
+
+    document.getElementById('form-title').innerHTML =
+        '<i data-lucide="pencil" class="w-5 h-5 text-amber-500"></i> Éditer la transaction';
+    if (window.lucide) window.lucide.createIcons();
+
+    const btn = document.getElementById('submit-btn');
+    btn.textContent = 'Mettre à jour';
+    btn.className = btn.className
+        .replace('bg-indigo-600', 'bg-amber-600')
+        .replace('hover:bg-indigo-500', 'hover:bg-amber-500');
+
     document.getElementById('recurring-container').classList.add('hidden');
     document.getElementById('cancel-edit-btn').classList.remove('hidden');
 };
 
-window.cancelEdit = function() {
+window.cancelEdit = function () {
     editingTransaction = null;
     document.getElementById('transaction-form').reset();
-    document.getElementById('form-title').innerHTML = '<i data-lucide="plus-circle" class="w-5 h-5 text-indigo-500"></i> Saisir une transaction';
-    if(window.lucide) window.lucide.createIcons();
+    document.getElementById('form-title').innerHTML =
+        '<i data-lucide="plus-circle" class="w-5 h-5 text-indigo-500"></i> Saisir une transaction';
+    if (window.lucide) window.lucide.createIcons();
 
-    const submitBtn = document.getElementById('submit-btn');
-    submitBtn.textContent = "Enregistrer";
-    submitBtn.classList.replace('bg-amber-600', 'bg-indigo-600');
-    submitBtn.classList.replace('hover:bg-amber-500', 'hover:bg-indigo-500');
+    const btn = document.getElementById('submit-btn');
+    btn.textContent = 'Enregistrer';
+    btn.className = btn.className
+        .replace('bg-amber-600', 'bg-indigo-600')
+        .replace('hover:bg-amber-500', 'hover:bg-indigo-500');
+
     document.getElementById('recurring-container').classList.remove('hidden');
     document.getElementById('recurring-duration-container').classList.add('hidden');
     document.getElementById('cancel-edit-btn').classList.add('hidden');
     window.updateCategoryOptions();
 };
 
-window.toggleRecurringOptions = function() {
-    const container = document.getElementById('recurring-duration-container');
-    if(document.getElementById('form-recurring').checked) {
-        container.classList.remove('hidden');
-    } else {
-        container.classList.add('hidden');
-    }
+window.toggleRecurringOptions = function () {
+    const show = document.getElementById('form-recurring').checked;
+    document.getElementById('recurring-duration-container').classList.toggle('hidden', !show);
 };
 
-window.addNextMonth = function(skipRender = false) {
-    if(!financialData) return;
-    const lastMonth = financialData.months[financialData.months.length - 1];
-    const lastIndex = monthNames.findIndex(m => m.toLowerCase() === lastMonth.name.toLowerCase());
-    let nextIndex = (lastIndex + 1) % 12;
-    const nextName = monthNames[nextIndex];
-    let nextYear = lastMonth.year;
-    if (nextIndex === 0) { nextYear++; }
-    const nextId = `${nextName.toLowerCase().replace('é', 'e').replace('û', 'u')}-${nextYear}`;
+window.addNextMonth = function (skipRender = false) {
+    if (!financialData) return;
+    const last      = financialData.months[financialData.months.length - 1];
+    const lastIdx   = monthNames.findIndex(m => m === last.name);
+    const nextIdx   = (lastIdx + 1) % 12;
+    const nextName  = monthNames[nextIdx];
+    const nextYear  = nextIdx === 0 ? last.year + 1 : last.year;
+    const nextId    = slugifyMonth(nextName, nextYear);
+
+    // Éviter les doublons
+    if (financialData.months.some(m => m.id === nextId)) return;
 
     financialData.months.push({
         id: nextId, name: nextName, year: nextYear, status: 'standard',
-        incomes: { total: 0, details: [] }, expenses: { total: 0, details: [] }, endBalance: 0, note: ``
+        incomes: { total: 0, details: [] }, expenses: { total: 0, details: [] },
+        endBalance: 0, note: ''
     });
-    
-    initFilters(); 
-    
-    if(!skipRender) {
+
+    initFilters();
+    if (!skipRender) {
         document.getElementById('filter-end').value = financialData.months.length - 1;
         window.updateApp();
     }
 };
 
-window.handleAddTransaction = function(e) {
+window.handleAddTransaction = function (e) {
     e.preventDefault();
-    if(!financialData) return;
-    
-    const monthId = document.getElementById('form-month').value;
-    const type = document.getElementById('form-type').value;
+    if (!financialData) return;
+
+    const monthId  = document.getElementById('form-month').value;
+    const type     = document.getElementById('form-type').value;
     const category = document.getElementById('form-category').value;
-    const label = document.getElementById('form-label').value;
-    const amount = parseFloat(document.getElementById('form-amount').value);
-    const day = parseInt(document.getElementById('form-day').value);
-    
-    const isRecurring = document.getElementById('form-recurring') ? document.getElementById('form-recurring').checked : false;
-    const recurringDuration = document.getElementById('form-recurring-duration') ? document.getElementById('form-recurring-duration').value : 'all';
+    const label    = document.getElementById('form-label').value.trim();
+    const amount   = parseFloat(document.getElementById('form-amount').value);
+    const day      = parseInt(document.getElementById('form-day').value);
+
+    // Validation basique
+    if (!label || isNaN(amount) || amount <= 0 || isNaN(day) || day < 1 || day > 31) {
+        alert('Vérifiez les champs : montant > 0, jour entre 1 et 31, description requise.');
+        return;
+    }
 
     if (editingTransaction) {
         const month = financialData.months.find(m => m.id === editingTransaction.monthId);
-        if (month) {
-            month[editingTransaction.type].details[editingTransaction.index] = { label, amount, day, category };
-        }
-        window.cancelEdit(); 
+        if (month) month[editingTransaction.type].details[editingTransaction.index] = { label, amount, day, category };
+        window.cancelEdit();
     } else {
-        const startIndex = financialData.months.findIndex(m => m.id === monthId);
-        if (startIndex !== -1) {
+        const isRecurring = document.getElementById('form-recurring')?.checked ?? false;
+        const duration    = document.getElementById('form-recurring-duration')?.value ?? 'all';
+        const startIdx    = financialData.months.findIndex(m => m.id === monthId);
+
+        if (startIdx !== -1) {
             if (isRecurring) {
-                let limit = financialData.months.length;
-                if (recurringDuration !== 'all') {
-                    limit = startIndex + parseInt(recurringDuration);
-                }
-                while(financialData.months.length < limit) {
-                    window.addNextMonth(true); 
-                }
-                for (let i = startIndex; i < limit; i++) {
+                let limit = duration === 'all' ? financialData.months.length : startIdx + parseInt(duration);
+                while (financialData.months.length < limit) window.addNextMonth(true);
+                for (let i = startIdx; i < limit; i++) {
                     financialData.months[i][type].details.push({ label, amount, day, category });
                 }
             } else {
-                financialData.months[startIndex][type].details.push({ label, amount, day, category });
+                financialData.months[startIdx][type].details.push({ label, amount, day, category });
             }
         }
-        document.getElementById('form-label').value = '';
+
+        document.getElementById('form-label').value  = '';
         document.getElementById('form-amount').value = '';
-        if(document.getElementById('form-recurring')) {
+        if (document.getElementById('form-recurring')) {
             document.getElementById('form-recurring').checked = false;
             window.toggleRecurringOptions();
         }
     }
-    window.updateApp(); 
+    window.updateApp();
 };
 
-window.deleteTransaction = function(monthId, type, index) {
-    if(!financialData) return;
+window.deleteTransaction = function (monthId, type, index) {
+    if (!financialData) return;
+    if (!confirm('Supprimer cette transaction ?')) return;
     const month = financialData.months.find(m => m.id === monthId);
     if (month) { month[type].details.splice(index, 1); window.updateApp(); }
 };
 
-window.resetData = function() {
-    if(confirm("Attention : Rétablir la base de données effacera vos données. Continuer ?")) {
-        financialData = JSON.parse(JSON.stringify(defaultData));
-        saveDataToCloud().then(() => { location.reload(); });
-    }
+window.resetData = function () {
+    if (!confirm('Réinitialiser toutes les données ? Cette action est irréversible.')) return;
+    financialData = generateDefaultData();
+    saveData().then(() => location.reload());
 };
 
-window.exportPDF = function() {
+// ─── Export PDF ───────────────────────────────────────────────────────────────
+window.exportPDF = function () {
     showSaveStatus('Export en cours...', 'text-emerald-400');
-    
-    const filteredMonths = getFilteredMonths();
-    if(filteredMonths.length === 0) return;
-    const startMonth = filteredMonths[0];
-    const endMonth = filteredMonths[filteredMonths.length - 1];
+    const filtered = getFilteredMonths();
+    if (!filtered.length) return;
+    const start = filtered[0];
+    const end   = filtered[filtered.length - 1];
 
-    let htmlContent = `
-        <div style="padding: 20px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1f2937; background: white;">
-            
-            <div style="border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-bottom: 20px;">
-                <h1 style="color: #4f46e5; font-size: 24px; margin: 0;">Rapport Financier - Flux</h1>
-                <p style="font-size: 14px; color: #6b7280; margin-top: 5px;">
-                    Exercice : ${startMonth.name} ${startMonth.year} à ${endMonth.name} ${endMonth.year}<br>
+    let html = `
+        <div style="padding:20px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#1f2937;background:white;">
+            <div style="border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin-bottom:20px;">
+                <h1 style="color:#4f46e5;font-size:24px;margin:0;">Rapport Financier — Flux</h1>
+                <p style="font-size:13px;color:#6b7280;margin-top:5px;">
+                    Exercice : ${sanitize(start.name)} ${start.year} → ${sanitize(end.name)} ${end.year}<br>
                     Édité le : ${new Date().toLocaleDateString('fr-FR')}
                 </p>
             </div>
-
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px;">
-                <tr style="page-break-inside: avoid;">
-                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f9fafb; text-align: left;">Total Encaissements</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f9fafb; text-align: left;">Total Décaissements</th>
-                    <th style="border: 1px solid #e5e7eb; padding: 10px; background-color: #f3f4f6; text-align: left; color: #4f46e5;">Variation Nette</th>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:24px;font-size:13px;">
+                <tr>
+                    <th style="border:1px solid #e5e7eb;padding:9px;background:#f9fafb;text-align:left;">Total Encaissements</th>
+                    <th style="border:1px solid #e5e7eb;padding:9px;background:#f9fafb;text-align:left;">Total Décaissements</th>
+                    <th style="border:1px solid #e5e7eb;padding:9px;background:#f3f4f6;text-align:left;color:#4f46e5;">Trésorerie Nette</th>
                 </tr>
-                <tr style="page-break-inside: avoid;">
-                    <td style="border: 1px solid #e5e7eb; padding: 10px; color: #10b981; font-weight: bold;">${formatEur(financialData.summary.totalIncomes)}</td>
-                    <td style="border: 1px solid #e5e7eb; padding: 10px; color: #ef4444; font-weight: bold;">${formatEur(financialData.summary.totalExpenses)}</td>
-                    <td style="border: 1px solid #e5e7eb; padding: 10px; font-weight: bold;">${formatEur(financialData.summary.filteredBalance)}</td>
+                <tr>
+                    <td style="border:1px solid #e5e7eb;padding:9px;color:#10b981;font-weight:bold;">${formatEur(financialData.summary.totalIncomes)}</td>
+                    <td style="border:1px solid #e5e7eb;padding:9px;color:#ef4444;font-weight:bold;">${formatEur(financialData.summary.totalExpenses)}</td>
+                    <td style="border:1px solid #e5e7eb;padding:9px;font-weight:bold;">${formatEur(financialData.summary.filteredBalance)}</td>
                 </tr>
-            </table>
-    `;
+            </table>`;
 
-    filteredMonths.forEach(month => {
-        htmlContent += `
-            <div style="page-break-inside: avoid;">
-                <h2 style="font-size: 16px; color: #111827; margin-top: 20px; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #e5e7eb;">
-                    ${month.name} ${month.year}
+    filtered.forEach(month => {
+        const txs = [
+            ...month.incomes.details.map(i => ({ ...i, txType: 'Encaissement' })),
+            ...month.expenses.details.map(i => ({ ...i, txType: 'Décaissement' }))
+        ].sort((a, b) => a.day - b.day);
+
+        const rows = txs.length
+            ? txs.map(tx => `
+                <tr>
+                    <td style="border:1px solid #e5e7eb;padding:7px;text-align:center;">${String(tx.day).padStart(2,'0')}</td>
+                    <td style="border:1px solid #e5e7eb;padding:7px;color:${tx.txType==='Encaissement'?'#10b981':'#ef4444'};font-weight:bold;">${tx.txType}</td>
+                    <td style="border:1px solid #e5e7eb;padding:7px;color:#6b7280;">${sanitize(tx.category)}</td>
+                    <td style="border:1px solid #e5e7eb;padding:7px;">${sanitize(tx.label)}</td>
+                    <td style="border:1px solid #e5e7eb;padding:7px;text-align:right;font-weight:bold;">${formatEur(tx.amount)}</td>
+                </tr>`).join('')
+            : `<tr><td colspan="5" style="border:1px solid #e5e7eb;padding:7px;text-align:center;color:#9ca3af;font-style:italic;">Aucune transaction</td></tr>`;
+
+        html += `
+            <div style="page-break-inside:avoid;">
+                <h2 style="font-size:15px;color:#111827;margin:20px 0 8px;padding-bottom:5px;border-bottom:1px solid #e5e7eb;">
+                    ${sanitize(month.name)} ${month.year}
                 </h2>
-                <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 5px;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:5px;">
                     <thead>
-                        <tr style="page-break-inside: avoid;">
-                            <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 10%;">Date</th>
-                            <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 15%;">Type</th>
-                            <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 25%;">Catégorie</th>
-                            <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: left; width: 35%;">Description</th>
-                            <th style="border: 1px solid #e5e7eb; padding: 8px; background: #f9fafb; text-align: right; width: 15%;">Montant</th>
+                        <tr>
+                            <th style="border:1px solid #e5e7eb;padding:7px;background:#f9fafb;text-align:left;width:8%;">Jour</th>
+                            <th style="border:1px solid #e5e7eb;padding:7px;background:#f9fafb;text-align:left;width:15%;">Type</th>
+                            <th style="border:1px solid #e5e7eb;padding:7px;background:#f9fafb;text-align:left;width:22%;">Catégorie</th>
+                            <th style="border:1px solid #e5e7eb;padding:7px;background:#f9fafb;text-align:left;width:40%;">Description</th>
+                            <th style="border:1px solid #e5e7eb;padding:7px;background:#f9fafb;text-align:right;width:15%;">Montant</th>
                         </tr>
                     </thead>
-                    <tbody>
-        `;
-
-        let allTransactions = [];
-        month.incomes.details.forEach(item => allTransactions.push({...item, txType: 'Encaissement'}));
-        month.expenses.details.forEach(item => allTransactions.push({...item, txType: 'Décaissement'}));
-        allTransactions.sort((a, b) => a.day - b.day);
-
-        if (allTransactions.length === 0) {
-            htmlContent += `<tr style="page-break-inside: avoid;"><td colspan="5" style="border: 1px solid #e5e7eb; padding: 8px; text-align: center; color: #9ca3af; font-style: italic;">Aucune transaction comptabilisée</td></tr>`;
-        } else {
-            allTransactions.forEach(tx => {
-                const color = tx.txType === 'Encaissement' ? '#10b981' : '#ef4444';
-                htmlContent += `
-                    <tr style="page-break-inside: avoid;">
-                        <td style="border: 1px solid #e5e7eb; padding: 8px; text-align: center;">${tx.day < 10 ? '0'+tx.day : tx.day}</td>
-                        <td style="border: 1px solid #e5e7eb; padding: 8px; color: ${color}; font-weight: bold;">${tx.txType}</td>
-                        <td style="border: 1px solid #e5e7eb; padding: 8px; color: #6b7280;">${cleanCategory(tx.category)}</td>
-                        <td style="border: 1px solid #e5e7eb; padding: 8px;">${tx.label}</td>
-                        <td style="border: 1px solid #e5e7eb; padding: 8px; text-align: right; font-weight: bold;">${formatEur(tx.amount)}</td>
-                    </tr>
-                `;
-            });
-        }
-
-        htmlContent += `
-                    </tbody>
+                    <tbody>${rows}</tbody>
                 </table>
-                <div style="text-align: right; font-size: 14px; margin-bottom: 30px; page-break-inside: avoid;">
-                    <strong>Clôture ${month.name} : <span style="color: ${month.endBalance < 0 ? '#ef4444' : '#4f46e5'}">${formatEur(month.endBalance)}</span></strong>
+                <div style="text-align:right;font-size:13px;margin-bottom:24px;">
+                    <strong>Clôture ${sanitize(month.name)} : <span style="color:${month.endBalance<0?'#ef4444':'#4f46e5'}">${formatEur(month.endBalance)}</span></strong>
                 </div>
-            </div>
-        `;
+            </div>`;
     });
 
-    htmlContent += `</div>`;
+    html += '</div>';
 
-    const printDiv = document.createElement('div');
-    printDiv.innerHTML = htmlContent;
+    const div = document.createElement('div');
+    div.innerHTML = html;
 
-    const opt = {
-      margin:       10,
-      filename:     `Flux_Rapport_${new Date().toISOString().slice(0,10)}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      pagebreak:    { mode: ['css', 'avoid-all'] }, 
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-
-    html2pdf().set(opt).from(printDiv).save().then(() => {
-        showSaveStatus('Terminé', 'text-indigo-400');
-    });
+    html2pdf().set({
+        margin: 10,
+        filename: `Flux_Rapport_${new Date().toISOString().slice(0,10)}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        pagebreak: { mode: ['css', 'avoid-all'] },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }).from(div).save().then(() => showSaveStatus('Terminé', 'text-indigo-400'));
 };
 
-window.logout = async function() {
-    await signOut(auth);
-    window.location.href = "index.html";
+// ─── Déconnexion ──────────────────────────────────────────────────────────────
+window.logout = async function () {
+    await supabase.auth.signOut();
+    window.location.href = 'index.html';
 };
