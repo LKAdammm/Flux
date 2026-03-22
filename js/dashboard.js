@@ -18,22 +18,25 @@ const categoriesDef = {
     incomes: ['Salaire', 'Bourse / Aides', 'Remboursement', 'Cadeau', 'Autre']
 };
 
-const defaultData = {
-    summary: { totalIncomes: 0, totalExpenses: 0, finalBalance: 0, savingsGoal: 1000, goalName: 'Objectif', goalActive: false },
-    months: [
-        {
-            id: 'mars-2026', name: 'Mars', year: 2026, status: 'critical',
-            incomes: { total: 0, details: [] }, 
-            expenses: { total: 0, details: [{label: 'Frais bancaires', amount: 124.50, day: 26, category: 'Frais bancaires'}]},
-            endBalance: 0, note: "Couvert par la facilité de caisse."
-        },
-        {
-            id: 'avril-2026', name: 'Avril', year: 2026, status: 'standard',
-            incomes: { total: 0, details: [{label: 'Bourse', amount: 382, day: 3, category: 'Bourse / Aides'}, {label: 'Salaire', amount: 240, day: 3, category: 'Salaire'}]},
-            expenses: { total: 0, details: [{label: 'Transport', amount: 42, day: 1, category: 'Transport'}, {label: 'Scolarité', amount: 670, day: 15, category: 'Scolarité'}]},
-            endBalance: 0, note: ""
-        }
-    ]
+// NOUVEAU : Fonction qui génère un compte vide sur le mois en cours
+const generateDefaultData = () => {
+    const d = new Date();
+    const currentMonth = monthNames[d.getMonth()];
+    const currentYear = d.getFullYear();
+    // Enlève les accents pour l'ID (ex: "février" devient "fevrier")
+    const currentId = `${currentMonth.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}-${currentYear}`;
+
+    return {
+        summary: { totalIncomes: 0, totalExpenses: 0, finalBalance: 0, savingsGoal: 1000, goalName: 'Mon premier objectif', goalActive: false },
+        months: [
+            {
+                id: currentId, name: currentMonth, year: currentYear, status: 'standard',
+                incomes: { total: 0, details: [] }, 
+                expenses: { total: 0, details: [] },
+                endBalance: 0, note: "Bienvenue sur Flux ! Saisissez votre première transaction."
+            }
+        ]
+    };
 };
 
 const formatEur = (num) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(num);
@@ -72,7 +75,8 @@ async function loadDataFromCloud() {
             if(financialData.summary.goalActive === undefined) financialData.summary.goalActive = false;
             showSaveStatus('À jour', 'text-indigo-400');
         } else {
-            financialData = JSON.parse(JSON.stringify(defaultData));
+            // NOUVEAU : On appelle la fonction pour générer un compte vierge au mois actuel !
+            financialData = generateDefaultData();
             await saveDataToCloud(); 
         }
         window.updateCategoryOptions(); 
