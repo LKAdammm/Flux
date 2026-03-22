@@ -208,22 +208,23 @@
             </div>
             <!-- Ligne 2 : objectif -->
             <div class="px-4 py-3">
-                <div class="flex flex-wrap items-center gap-3">
-                    <div class="flex items-center gap-2 shrink-0">
-                        <input type="checkbox" id="goal-active" onchange="window.updateGoal()"
-                               class="w-3.5 h-3.5 text-indigo-600 bg-zinc-950 border-zinc-600 rounded cursor-pointer">
-                        <span class="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest whitespace-nowrap">Objectif</span>
-                    </div>
+                <!-- Ligne 1 mobile : checkbox + label + % -->
+                <div class="flex items-center gap-2 mb-2">
+                    <input type="checkbox" id="goal-active" onchange="window.updateGoal()"
+                           class="w-3.5 h-3.5 text-indigo-600 bg-zinc-950 border-zinc-600 rounded cursor-pointer shrink-0">
+                    <span class="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest whitespace-nowrap">Objectif</span>
+                    <span id="goal-percent" class="text-xs font-bold text-indigo-400 hidden ml-auto shrink-0">0%</span>
+                </div>
+                <!-- Ligne 2 mobile : nom + montant -->
+                <div class="flex items-center gap-2">
                     <input type="text" id="goal-name" onchange="window.updateGoal()"
                            placeholder="Description de l'objectif..."
-                           title=""
-                           class="bg-transparent border-b border-zinc-700 focus:border-indigo-500 text-zinc-200 text-xs outline-none placeholder-zinc-600 min-w-0 flex-1 max-w-xs">
+                           class="bg-transparent border-b border-zinc-700 focus:border-indigo-500 text-zinc-200 text-xs outline-none placeholder-zinc-600 min-w-0 flex-1">
                     <div class="flex items-center gap-1.5 shrink-0">
                         <input type="number" id="goal-input" onchange="window.updateGoal()"
-                               class="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 w-24 text-xs font-mono focus:outline-none focus:border-indigo-500" value="1000">
+                               class="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 w-20 text-xs font-mono focus:outline-none focus:border-indigo-500" value="1000">
                         <span class="text-[10px] font-semibold text-zinc-500">EUR</span>
                     </div>
-                    <span id="goal-percent" class="text-xs font-bold text-indigo-400 hidden ml-auto shrink-0">0%</span>
                 </div>
                 <div id="goal-bar-container" class="hidden mt-2 w-full bg-zinc-950 rounded-full h-1.5 border border-zinc-800 overflow-hidden">
                     <div id="goal-bar" class="bg-indigo-600 h-1.5 rounded-full transition-all duration-500 w-0"></div>
