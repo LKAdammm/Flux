@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flux - Tableau de bord</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234f46e5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M3 3v18h18'/><path d='m19 9-5 5-4-4-3 3'/></svg>">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234f46e5'/><rect x='8' y='18' width='3' height='6' rx='1' fill='white'/><rect x='14' y='13' width='3' height='11' rx='1' fill='white'/><rect x='20' y='9' width='3' height='15' rx='1' fill='white'/></svg>">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -21,14 +21,8 @@
         .doughnut-container { position: relative; width: 100%; height: 200px; }
         .month-card-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out, opacity 0.2s ease-out; opacity: 0; }
         .month-card-content.active { max-height: 2000px; opacity: 1; }
-        /* Drawer */
-        #transaction-drawer {
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        #drawer-overlay {
-            transition: opacity 0.3s ease;
-            opacity: 0;
-        }
+        #transaction-drawer { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        #drawer-overlay { transition: opacity 0.3s ease; opacity: 0; }
     </style>
 </head>
 <body class="antialiased font-sans flex flex-col min-h-screen">
@@ -44,13 +38,12 @@
                 <span id="save-status" class="hidden text-[10px] px-2 py-0.5 rounded border border-zinc-800 ml-2 font-medium text-zinc-400"></span>
             </div>
             <div class="flex items-center gap-2">
-                <!-- Bouton ouvrir drawer -->
-                <button onclick="window.toggleDrawer()"
+                <button data-action="toggle-drawer"
                         class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition flex items-center gap-1.5 shadow-sm">
                     <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                     <span class="hidden sm:inline">Transaction</span>
                 </button>
-                <button onclick="window.logout()"
+                <button data-action="logout"
                         class="text-xs font-medium text-zinc-400 hover:text-white transition-colors flex items-center gap-1.5 bg-zinc-900 px-3 py-1.5 rounded-md border border-zinc-800 hover:border-zinc-700 shrink-0">
                     <span class="hidden sm:inline">Se déconnecter</span>
                     <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
@@ -60,33 +53,33 @@
     </header>
 
     <!-- Drawer overlay -->
-    <div id="drawer-overlay" onclick="window.closeDrawer()" class="hidden fixed inset-0 bg-black/40 z-40" data-html2canvas-ignore></div>
+    <div id="drawer-overlay" data-action="close-drawer" class="hidden fixed inset-0 bg-black/40 z-40" data-html2canvas-ignore></div>
 
     <!-- Drawer (panneau coulissant) -->
     <aside id="transaction-drawer"
            class="fixed top-0 right-0 h-full w-full max-w-md bg-zinc-900 border-l border-zinc-800 shadow-2xl z-50 translate-x-full overflow-y-auto"
            data-html2canvas-ignore>
 
-        <!-- Drawer header -->
         <div class="sticky top-0 bg-zinc-900/95 backdrop-blur-sm border-b border-zinc-800 px-5 py-4 flex items-center justify-between z-10">
             <h2 id="form-title" class="text-sm font-semibold text-white flex items-center gap-2">
                 <i data-lucide="plus-circle" class="w-4 h-4 text-indigo-500"></i> Nouvelle transaction
             </h2>
-            <button onclick="window.closeDrawer()" class="p-1.5 text-zinc-400 hover:text-white transition-colors rounded-md hover:bg-zinc-800">
+            <button data-action="close-drawer" class="p-1.5 text-zinc-400 hover:text-white transition-colors rounded-md hover:bg-zinc-800">
                 <i data-lucide="x" class="w-4 h-4"></i>
             </button>
         </div>
 
-        <!-- Formulaire -->
-        <form onsubmit="window.handleAddTransaction(event)" id="transaction-form" class="px-5 py-5 space-y-4 border-b border-zinc-800">
+        <form id="transaction-form" class="px-5 py-5 space-y-4 border-b border-zinc-800">
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label class="block text-[10px] font-semibold text-zinc-500 mb-1 uppercase tracking-widest">Période</label>
-                    <select id="form-month" class="w-full px-2.5 py-2 rounded-md border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs focus:border-indigo-500 outline-none transition" required></select>
+                    <select id="form-month" data-action-change="update-day-max"
+                            class="w-full px-2.5 py-2 rounded-md border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs focus:border-indigo-500 outline-none transition" required></select>
                 </div>
                 <div>
                     <label class="block text-[10px] font-semibold text-zinc-500 mb-1 uppercase tracking-widest">Nature</label>
-                    <select id="form-type" onchange="window.updateCategoryOptions()" class="w-full px-2.5 py-2 rounded-md border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs focus:border-indigo-500 outline-none transition" required>
+                    <select id="form-type" data-action-change="update-category-options"
+                            class="w-full px-2.5 py-2 rounded-md border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs focus:border-indigo-500 outline-none transition" required>
                         <option value="expenses">Décaissement (Sortie)</option>
                         <option value="incomes">Encaissement (Entrée)</option>
                     </select>
@@ -120,17 +113,15 @@
             <!-- Récurrence -->
             <div id="recurring-container" class="pt-3 border-t border-zinc-800">
                 <div class="flex items-center gap-2">
-                    <input type="checkbox" id="form-recurring" onchange="window.toggleRecurringOptions()"
+                    <input type="checkbox" id="form-recurring" data-action-change="toggle-recurring-options"
                            class="w-3.5 h-3.5 text-indigo-600 bg-zinc-950 border-zinc-700 rounded cursor-pointer">
                     <label for="form-recurring" class="text-xs text-zinc-400 cursor-pointer hover:text-zinc-200">Planifier une récurrence</label>
                 </div>
 
                 <div id="recurring-duration-container" class="hidden mt-3 pl-5 space-y-3">
-                    <!-- Durée -->
                     <div>
                         <label class="block text-[10px] font-semibold text-zinc-500 mb-1 uppercase tracking-widest">Durée</label>
-                        <select id="form-recurring-duration"
-                                onchange="document.getElementById('form-recurring-custom-wrap').classList.toggle('hidden', this.value !== 'custom')"
+                        <select id="form-recurring-duration" data-action-change="toggle-recurring-custom"
                                 class="w-full px-2.5 py-2 rounded-md border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs focus:border-indigo-500 outline-none transition">
                             <option value="all">Jusqu'à la fin de l'exercice</option>
                             <option value="2">2 mois</option>
@@ -141,13 +132,11 @@
                             <option value="custom">Personnalisé…</option>
                         </select>
                     </div>
-                    <!-- Durée personnalisée -->
                     <div id="form-recurring-custom-wrap" class="hidden">
                         <label class="block text-[10px] font-semibold text-zinc-500 mb-1 uppercase tracking-widest">Nombre de mois</label>
                         <input type="number" id="form-recurring-custom" min="1" max="120" value="6" placeholder="6"
                                class="w-full px-2.5 py-2 rounded-md border border-zinc-700 bg-zinc-950 text-zinc-200 text-xs font-mono focus:border-indigo-500 outline-none transition">
                     </div>
-                    <!-- Fréquence -->
                     <div>
                         <label class="block text-[10px] font-semibold text-zinc-500 mb-1 uppercase tracking-widest">Fréquence</label>
                         <select id="form-recurring-freq"
@@ -167,7 +156,7 @@
                         class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs py-2.5 rounded-md transition flex justify-center items-center gap-2">
                     Enregistrer
                 </button>
-                <button type="button" id="cancel-edit-btn" onclick="window.cancelEdit()"
+                <button type="button" id="cancel-edit-btn" data-action="cancel-edit"
                         class="hidden bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2.5 px-3 rounded-md transition">
                     <i data-lucide="x" class="w-3.5 h-3.5"></i>
                 </button>
@@ -178,7 +167,7 @@
         <div class="px-5 py-4">
             <div class="flex justify-between items-center mb-3">
                 <h3 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">Transactions</h3>
-                <button onclick="window.resetData()" class="text-[10px] font-semibold text-rose-500/60 hover:text-rose-400 transition">
+                <button data-action="reset-data" class="text-[10px] font-semibold text-rose-500/60 hover:text-rose-400 transition">
                     Réinitialiser
                 </button>
             </div>
@@ -186,42 +175,38 @@
         </div>
     </aside>
 
-    <!-- Contenu principal (pleine largeur maintenant) -->
+    <!-- Contenu principal -->
     <main id="export-area" class="flex-1 max-w-[1200px] w-full mx-auto px-4 sm:px-6 py-6 space-y-5">
 
         <!-- Barre de contrôles : filtre + objectif + export -->
         <div class="bg-zinc-900 rounded-xl border border-zinc-800 shadow-sm overflow-hidden" data-html2canvas-ignore>
-            <!-- Ligne 1 : filtre + export -->
             <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800">
                 <div class="flex items-center gap-2 bg-zinc-950 px-3 py-1.5 rounded-md border border-zinc-800">
                     <span class="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Période</span>
-                    <select id="filter-start" onchange="window.updateApp()"
+                    <select id="filter-start" data-action-change="update-app"
                             class="bg-zinc-950 text-zinc-200 text-xs focus:outline-none cursor-pointer"></select>
                     <i data-lucide="arrow-right" class="w-3 h-3 text-zinc-600 shrink-0"></i>
-                    <select id="filter-end" onchange="window.updateApp()"
+                    <select id="filter-end" data-action-change="update-app"
                             class="bg-zinc-950 text-zinc-200 text-xs focus:outline-none cursor-pointer"></select>
                 </div>
-                <button onclick="window.exportPDF()"
+                <button data-action="export-pdf"
                         class="bg-zinc-100 hover:bg-white text-zinc-900 text-xs font-semibold px-3 py-1.5 rounded-md transition shadow-sm flex items-center gap-1.5 whitespace-nowrap">
                     <i data-lucide="download" class="w-3.5 h-3.5"></i> Exporter PDF
                 </button>
             </div>
-            <!-- Ligne 2 : objectif -->
             <div class="px-4 py-3">
-                <!-- Ligne 1 mobile : checkbox + label + % -->
                 <div class="flex items-center gap-2 mb-2">
-                    <input type="checkbox" id="goal-active" onchange="window.updateGoal()"
+                    <input type="checkbox" id="goal-active" data-action-change="update-goal"
                            class="w-3.5 h-3.5 text-indigo-600 bg-zinc-950 border-zinc-600 rounded cursor-pointer shrink-0">
                     <span class="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest whitespace-nowrap">Objectif</span>
                     <span id="goal-percent" class="text-xs font-bold text-indigo-400 hidden ml-auto shrink-0">0%</span>
                 </div>
-                <!-- Ligne 2 mobile : nom + montant -->
                 <div class="flex items-center gap-2">
-                    <input type="text" id="goal-name" onchange="window.updateGoal()"
+                    <input type="text" id="goal-name" data-action-change="update-goal"
                            placeholder="Description de l'objectif..."
                            class="bg-transparent border-b border-zinc-700 focus:border-indigo-500 text-zinc-200 text-xs outline-none placeholder-zinc-600 min-w-0 flex-1">
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <input type="number" id="goal-input" onchange="window.updateGoal()"
+                        <input type="number" id="goal-input" data-action-change="update-goal"
                                class="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 w-20 text-xs font-mono focus:outline-none focus:border-indigo-500" value="1000">
                         <span class="text-[10px] font-semibold text-zinc-500">EUR</span>
                     </div>
@@ -232,7 +217,7 @@
             </div>
         </div>
 
-        <!-- KPIs (4 colonnes) -->
+        <!-- KPIs -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div class="bg-zinc-900/60 p-4 rounded-xl border border-zinc-800 shadow-sm">
                 <div class="flex items-center justify-between mb-1">
@@ -259,7 +244,7 @@
             </div>
         </div>
 
-        <!-- Graphiques (3 colonnes) -->
+        <!-- Graphiques -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div class="bg-zinc-900 p-5 rounded-xl border border-zinc-800 shadow-sm lg:col-span-2">
                 <h2 class="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-4">Évolution du solde</h2>
@@ -279,7 +264,7 @@
         <div>
             <div class="flex items-center justify-between mb-4 mt-4" data-html2canvas-ignore>
                 <h2 class="text-base font-semibold text-zinc-100 tracking-tight">Historique mensuel</h2>
-                <button onclick="window.addNextMonth()"
+                <button data-action="add-next-month"
                         class="text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-md transition border border-zinc-700 flex items-center gap-1.5">
                     <i data-lucide="plus" class="w-3 h-3"></i> Nouvelle période
                 </button>
